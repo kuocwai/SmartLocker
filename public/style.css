@@ -1,0 +1,103 @@
+/* ========================================================
+   CUSTOM STYLING & ANIMATIONS FOR SMART LOCKER 2D DASHBOARD
+   ======================================================== */
+
+/* Tab Button Styles */
+.tab-btn {
+  color: #94a3b8;
+  background-color: transparent;
+}
+
+.tab-btn:hover {
+  color: #f8fafc;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.tab-btn.active {
+  color: #ffffff;
+  background-color: #f26f21; /* FPT Orange */
+  box-shadow: 0 4px 12px rgba(242, 111, 33, 0.25);
+}
+
+/* Locker Card Flat Design States */
+.locker-card {
+  transition: all 0.25s ease-in-out;
+}
+
+.locker-card.state-available {
+  border-color: #10b981;
+  background: linear-gradient(180deg, #ffffff 0%, #f0fdf4 100%);
+}
+
+.locker-card.state-waiting {
+  border-color: #f59e0b;
+  background: linear-gradient(180deg, #ffffff 0%, #fffbeb 100%);
+}
+
+.locker-card.state-stored {
+  border-color: #ef4444;
+  background: linear-gradient(180deg, #ffffff 0%, #fef2f2 100%);
+}
+
+.locker-card.state-abandoned {
+  border-color: #8b5cf6;
+  background: linear-gradient(180deg, #ffffff 0%, #f5f3ff 100%);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Utility hide scrollbar */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* SLA Bar pulse effect when in warning */
+.sla-pulse {
+  animation: slaPulse 1.8s infinite;
+}
+
+@keyframes slaPulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}

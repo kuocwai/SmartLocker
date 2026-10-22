@@ -1,28 +1,26 @@
 {
-  "name": "smartlocker",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "name": "smartlocker-backend",
+  "version": "2.0.0",
+  "description": "Smart Food & Parcel Locker Prototype (2 Ngăn) - Backend & Web Dashboard",
+  "main": "server.js",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "lint": "oxlint",
-    "preview": "vite preview"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
   "dependencies": {
-    "@react-three/drei": "^10.7.9",
-    "@react-three/fiber": "^9.8.1",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "three": "^0.186.1"
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
   },
-  "devDependencies": {
-    "@tailwindcss/vite": "^4.3.3",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.7",
-    "@vitejs/plugin-react": "^6.1.1",
-    "oxlint": "^1.81.0",
-    "tailwindcss": "^4.3.3",
-    "vite": "^8.3.0"
-  }
+  "optionalDependencies": {
+    "better-sqlite3": "^11.8.1"
+  },
+  "keywords": [
+    "iot",
+    "esp32",
+    "smart-locker",
+    "express",
+    "dashboard"
+  ],
+  "author": "SmartLocker Team",
+  "license": "MIT"
 }
