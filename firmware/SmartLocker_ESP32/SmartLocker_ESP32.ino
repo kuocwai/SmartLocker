@@ -31,12 +31,12 @@
 // 1. CẤU HÌNH MẠNG WI-FI VÀ ĐỊA CHỈ BACKEND SERVER
 // ======================================================================================
 // THAY ĐỔI TÊN WIFI VÀ MẬT KHẨU TẠI ĐÂY:
-const char* WIFI_SSID     = "YOUR_WIFI_SSID";         // Ví dụ: "FPT-University" hoặc Hotspot điện thoại
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";     // Mật khẩu WiFi
+const char* WIFI_SSID     = "LONG NHUT 5G";         // Ví dụ: "FPT-University" hoặc Hotspot điện thoại
+const char* WIFI_PASSWORD = "30041975";     // Mật khẩu WiFi
 
 // THAY ĐỔI ĐỊA CHỈ IP MÁY TÍNH CHẠY NODE.JS SERVER (Xem lệnh `ipconfig` trên Windows):
 // LƯU Ý: Máy tính và ESP32 phải kết nối CHUNG MỘT MẠNG WiFi / Điểm phát sóng Hotspot.
-String SERVER_BASE_URL    = "http://192.168.1.14:3000"; // Đổi thành IP LAN của bạn
+String SERVER_BASE_URL    = "http://192.168.1.12:3000"; // Đổi thành IP LAN của bạn
 
 // Các đường dẫn API endpoints
 const String API_VERIFY_OTP    = "/api/locker/verify-otp";
