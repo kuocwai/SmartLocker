@@ -27,19 +27,35 @@ function broadcastUpdate(eventType = 'UPDATE', payload = {}) {
   });
 }
 
-// Hàm lấy địa chỉ IP LAN của máy tính
-function getLocalIpAddresses() {
+// Hàm lấy danh sách địa chỉ IP mạng kèm tên card mạng
+function getNetworkInterfacesList() {
   const interfaces = os.networkInterfaces();
-  const addresses = [];
+  const results = [];
+  
   for (const name of Object.keys(interfaces)) {
+    const isVirtual = /vmnet|virtual|vbox|wsl|hyper-v|vethernet|loopback/i.test(name);
     for (const iface of interfaces[name]) {
-      // Bỏ qua IPv6 và địa chỉ nội bộ 127.0.0.1
       if (iface.family === 'IPv4' && !iface.internal) {
-        addresses.push(iface.address);
+        results.push({
+          name,
+          address: iface.address,
+          isVirtual,
+          isWifi: /wi-fi|wifi|wireless|wlan/i.test(name)
+        });
       }
     }
   }
-  return addresses;
+
+  // Ưu tiên card Wi-Fi thật lên đầu, sau đó đến Ethernet thật, cuối cùng mới đến card ảo
+  results.sort((a, b) => {
+    if (a.isWifi && !b.isWifi) return -1;
+    if (!a.isWifi && b.isWifi) return 1;
+    if (!a.isVirtual && b.isVirtual) return -1;
+    if (a.isVirtual && !b.isVirtual) return 1;
+    return 0;
+  });
+
+  return results;
 }
 
 // Bổ sung thông tin SLA vào danh sách ngăn tủ
@@ -426,18 +442,26 @@ app.get('/api/events', (req, res) => {
 
 // Chạy server
 app.listen(PORT, '0.0.0.0', () => {
-  const localIps = getLocalIpAddresses();
+  const ifaces = getNetworkInterfacesList();
   console.log('\n======================================================');
   console.log('🚀 SMART FOOD & PARCEL LOCKER - BACKEND SERVER RUNNING');
   console.log('======================================================');
-  console.log(`* Local Web:  http://localhost:${PORT}`);
-  if (localIps.length > 0) {
-    localIps.forEach(ip => {
-      console.log(`* LAN Network (Dành cho ESP32 & Mobile): http://${ip}:${PORT}`);
+  console.log(`* Local Web (Trình duyệt máy tính): http://localhost:${PORT}`);
+  
+  const realIfaces = ifaces.filter(i => !i.isVirtual);
+  const virtualIfaces = ifaces.filter(i => i.isVirtual);
+
+  if (realIfaces.length > 0) {
+    realIfaces.forEach(i => {
+      console.log(`* IP Mạng LAN [${i.name}] (Dành cho ESP32 & Điện thoại): http://${i.address}:${PORT}`);
     });
-  } else {
-    console.log(`* Network: Chưa phát hiện IP mạng LAN ngoài localhost`);
   }
+  
+  if (virtualIfaces.length > 0) {
+    // In gọn các card ảo nếu có máy ảo VMware/WSL
+    console.log(`* (Card mạng ảo VMware/WSL: ${virtualIfaces.map(v => v.address).join(', ')})`);
+  }
+
   console.log(`* Database:   ${db.isSqlite() ? 'SQLite File (better-sqlite3)' : 'JSON File Store'}`);
   console.log('======================================================\n');
 });
