@@ -63,6 +63,11 @@ function getNetworkInterfacesList() {
   return results;
 }
 
+// Hàm lấy danh sách mảng chuỗi địa chỉ IP (tương thích ngược)
+function getLocalIpAddresses() {
+  return getNetworkInterfacesList().map(i => i.address);
+}
+
 // Bổ sung thông tin SLA vào danh sách ngăn tủ
 function enrichLockerWithSLA(locker) {
   const SLA_WARN_MIN = 45;
