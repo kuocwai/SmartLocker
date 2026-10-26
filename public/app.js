@@ -394,6 +394,7 @@ function renderSimulatorTab(lockers) {
 function checkGlobalSLAWarnings(lockers) {
   const alertBox = document.getElementById('sla-global-alert');
   const alertTxt = document.getElementById('sla-global-alert-text');
+  if (!alertBox || !alertTxt) return;
   
   const warnedLocker = lockers.find(l => l.sla && (l.sla.stage === 'WARNING' || l.sla.stage === 'ABANDONED'));
   
@@ -438,14 +439,22 @@ function openBookingModal(compartmentId) {
   }
 
   currentBookingCompId = compartmentId;
-  document.getElementById('modal-compartment-id').textContent = compartmentId;
-  document.getElementById('modal-title-comp').textContent = compartmentId;
-  document.getElementById('form-booking').reset();
-  document.getElementById('booking-modal').classList.remove('hidden');
+  const modalCompId = document.getElementById('modal-compartment-id');
+  if (modalCompId) modalCompId.textContent = compartmentId;
+
+  const modalTitle = document.getElementById('modal-title-comp');
+  if (modalTitle) modalTitle.textContent = compartmentId;
+
+  const form = document.getElementById('form-booking');
+  if (form) form.reset();
+
+  const modal = document.getElementById('booking-modal');
+  if (modal) modal.classList.remove('hidden');
 }
 
 function closeBookingModal() {
-  document.getElementById('booking-modal').classList.add('hidden');
+  const modal = document.getElementById('booking-modal');
+  if (modal) modal.classList.add('hidden');
 }
 
 async function handleBookingSubmit(e) {
@@ -495,22 +504,31 @@ async function handleBookingSubmit(e) {
 }
 
 function showOtpResultModal(data) {
-  document.getElementById('res-compartment-id').textContent = data.compartment_id;
-  document.getElementById('res-otp-shipper').textContent = data.otp_shipper;
-  document.getElementById('res-otp-student').textContent = data.otp_student;
+  const resCompId = document.getElementById('res-compartment-id');
+  if (resCompId) resCompId.textContent = data.compartment_id;
+
+  const resShipper = document.getElementById('res-otp-shipper');
+  if (resShipper) resShipper.textContent = data.otp_shipper;
+
+  const resStudent = document.getElementById('res-otp-student');
+  if (resStudent) resStudent.textContent = data.otp_student;
 
   const stName = (data.order && data.order.customer_name) ? data.order.customer_name : '';
   const stId = (data.order && data.order.student_id) ? ` (${data.order.student_id})` : '';
   const prefix = stName ? `Em ${stName}${stId}` : 'Em';
 
   currentShipperMessage = `${prefix} gửi đồ ở Tủ SmartLocker cổng trường - Ngăn ${data.compartment_id}, mã mở tủ của anh là ${data.otp_shipper} nhé anh.`;
-  document.getElementById('preview-shipper-msg').textContent = currentShipperMessage;
+  
+  const previewMsg = document.getElementById('preview-shipper-msg');
+  if (previewMsg) previewMsg.textContent = currentShipperMessage;
 
-  document.getElementById('otp-result-modal').classList.remove('hidden');
+  const otpModal = document.getElementById('otp-result-modal');
+  if (otpModal) otpModal.classList.remove('hidden');
 }
 
 function closeOtpResultModal() {
-  document.getElementById('otp-result-modal').classList.add('hidden');
+  const otpModal = document.getElementById('otp-result-modal');
+  if (otpModal) otpModal.classList.add('hidden');
 }
 
 async function copyShipperMessage() {
