@@ -163,13 +163,11 @@ function renderBookingTab(lockers) {
 
       if (locker.active_order) {
         orderBox.classList.remove('hidden');
-        const stId = locker.active_order.student_id ? ` (${escapeHtml(locker.active_order.student_id)})` : '';
         orderBox.innerHTML = `
           <div class="flex justify-between font-semibold text-slate-800">
-            <span>Đơn #${locker.active_order.id}: ${escapeHtml(locker.active_order.customer_name)}${stId}</span>
+            <span>Đơn #${locker.active_order.id} · SĐT: ${escapeHtml(locker.active_order.customer_phone)}</span>
             <span class="text-amber-700">Mã Shipper: <strong class="font-mono text-sm">${locker.active_order.otp_shipper}</strong></span>
           </div>
-          <p class="text-slate-500">${escapeHtml(locker.active_order.order_notes || 'Không có ghi chú')}</p>
         `;
       }
 
@@ -188,10 +186,9 @@ function renderBookingTab(lockers) {
 
       if (locker.active_order) {
         orderBox.classList.remove('hidden');
-        const stId = locker.active_order.student_id ? ` [${escapeHtml(locker.active_order.student_id)}]` : '';
         orderBox.innerHTML = `
           <div class="flex justify-between font-semibold text-slate-800">
-            <span>Người nhận: ${escapeHtml(locker.active_order.customer_name)}${stId} (${locker.active_order.customer_phone})</span>
+            <span>SĐT nhận: <strong>${escapeHtml(locker.active_order.customer_phone)}</strong></span>
             <span class="text-emerald-700">Mã SV: <strong class="font-mono text-sm">${locker.active_order.otp_student}</strong></span>
           </div>
           <div class="flex justify-between items-center pt-1 border-t border-slate-200/60 mt-1">
@@ -459,14 +456,11 @@ function closeBookingModal() {
 
 async function handleBookingSubmit(e) {
   e.preventDefault();
-  const name = document.getElementById('input-name').value.trim();
-  const studentId = (document.getElementById('input-student-id').value || '').trim().toUpperCase();
-  const phone = document.getElementById('input-phone').value.trim();
-  const notes = document.getElementById('input-notes').value.trim();
+  const phone = (document.getElementById('input-phone')?.value || '').trim();
   const btnSubmit = document.getElementById('btn-submit-booking');
 
-  if (!name || !studentId || !phone) {
-    showToast('Vui lòng nhập đầy đủ Họ tên, MSSV và Số điện thoại!', 'error');
+  if (!phone) {
+    showToast('Vui lòng nhập số điện thoại người nhận!', 'error');
     return;
   }
 
@@ -479,10 +473,7 @@ async function handleBookingSubmit(e) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         compartment_id: currentBookingCompId,
-        customer_name: name,
-        student_id: studentId,
-        customer_phone: phone,
-        order_notes: notes
+        customer_phone: phone
       })
     });
 
@@ -513,11 +504,10 @@ function showOtpResultModal(data) {
   const resStudent = document.getElementById('res-otp-student');
   if (resStudent) resStudent.textContent = data.otp_student;
 
-  const stName = (data.order && data.order.customer_name) ? data.order.customer_name : '';
-  const stId = (data.order && data.order.student_id) ? ` (${data.order.student_id})` : '';
-  const prefix = stName ? `Em ${stName}${stId}` : 'Em';
+  const phone = (data.order && data.order.customer_phone) ? data.order.customer_phone : '';
+  const suffix = phone ? ` (SĐT: ${phone})` : '';
 
-  currentShipperMessage = `${prefix} gửi đồ ở Tủ SmartLocker cổng trường - Ngăn ${data.compartment_id}, mã mở tủ của anh là ${data.otp_shipper} nhé anh.`;
+  currentShipperMessage = `Em gửi đồ ở Tủ SmartLocker cổng trường - Ngăn ${data.compartment_id}, mã mở tủ của anh là ${data.otp_shipper} nhé anh${suffix}.`;
   
   const previewMsg = document.getElementById('preview-shipper-msg');
   if (previewMsg) previewMsg.textContent = currentShipperMessage;

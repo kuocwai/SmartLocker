@@ -175,12 +175,13 @@ const db = {
     compartment_id = Number(compartment_id);
     const now = Date.now();
     const cleanStudentId = (student_id || '').trim().toUpperCase();
+    const cleanCustomerName = (customer_name || 'Khách hàng ' + customer_phone).trim();
     if (useSqlite) {
       const stmt = dbInstance.prepare(`
         INSERT INTO orders (compartment_id, customer_name, customer_phone, student_id, order_notes, otp_shipper, otp_student, status, created_at, warning_45m_sent)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'WAITING_DELIVERY', ?, 0)
       `);
-      const info = stmt.run(compartment_id, customer_name, customer_phone, cleanStudentId, order_notes || '', otp_shipper, otp_student, now);
+      const info = stmt.run(compartment_id, cleanCustomerName, customer_phone, cleanStudentId, order_notes || '', otp_shipper, otp_student, now);
       const orderId = Number(info.lastInsertRowid);
 
       // Cập nhật ngăn tủ
@@ -195,7 +196,7 @@ const db = {
       const order = {
         id: nextId,
         compartment_id,
-        customer_name,
+        customer_name: cleanCustomerName,
         customer_phone,
         student_id: cleanStudentId,
         order_notes: order_notes || '',
