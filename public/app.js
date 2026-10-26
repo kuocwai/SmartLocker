@@ -140,8 +140,10 @@ function renderBookingTab(lockers) {
 
     if (locker.status === 'AVAILABLE') {
       card.classList.add('state-available');
-      badge.textContent = 'TRỐNG (AVAILABLE)';
-      badge.className = 'px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold bg-emerald-100 text-emerald-800 border border-emerald-300';
+      if (badge) {
+        badge.textContent = 'TRỐNG (AVAILABLE)';
+        badge.className = 'px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold bg-emerald-100 text-emerald-800 border border-emerald-300';
+      }
       
       iconDoor.innerHTML = '<i class="fa-solid fa-door-closed text-emerald-500"></i>';
       descState.textContent = 'Ngăn sẵn sàng để đặt chỗ';
@@ -154,8 +156,10 @@ function renderBookingTab(lockers) {
 
     } else if (locker.status === 'WAITING_DELIVERY') {
       card.classList.add('state-waiting');
-      badge.textContent = 'CHỜ SHIPPER (WAITING)';
-      badge.className = 'px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold bg-amber-100 text-amber-900 border border-amber-300';
+      if (badge) {
+        badge.textContent = 'CHỜ SHIPPER (WAITING)';
+        badge.className = 'px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold bg-amber-100 text-amber-900 border border-amber-300';
+      }
 
       iconDoor.innerHTML = '<i class="fa-solid fa-motorcycle text-amber-500"></i>';
       descState.textContent = 'Đã đặt chỗ · Chờ Shipper nhập OTP cất món';
@@ -177,8 +181,10 @@ function renderBookingTab(lockers) {
 
     } else if (locker.status === 'STORED') {
       card.classList.add('state-stored');
-      badge.textContent = 'ĐÃ CÓ MÓN (STORED)';
-      badge.className = 'px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold bg-rose-100 text-rose-800 border border-rose-300';
+      if (badge) {
+        badge.textContent = 'ĐÃ CÓ MÓN (STORED)';
+        badge.className = 'px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold bg-rose-100 text-rose-800 border border-rose-300';
+      }
 
       iconDoor.innerHTML = '<i class="fa-solid fa-bowl-food text-rose-500"></i>';
       descState.textContent = 'Món ăn đã được lưu trữ an toàn trong tủ';
@@ -204,8 +210,10 @@ function renderBookingTab(lockers) {
 
     } else if (locker.status === 'ABANDONED') {
       card.classList.add('state-abandoned');
-      badge.textContent = 'QUÁ HẠN (ABANDONED)';
-      badge.className = 'px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold bg-purple-100 text-purple-800 border border-purple-300';
+      if (badge) {
+        badge.textContent = 'QUÁ HẠN (ABANDONED)';
+        badge.className = 'px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold bg-purple-100 text-purple-800 border border-purple-300';
+      }
 
       iconDoor.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-purple-600"></i>';
       descState.textContent = 'Quá hạn 120 phút · Tủ đã khóa để đảm bảo an toàn!';
