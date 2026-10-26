@@ -41,8 +41,8 @@ function setupSSE() {
     sseSource = new EventSource('/api/events');
 
     sseSource.onopen = () => {
-      indicator.className = 'h-2 w-2 rounded-full bg-emerald-500';
-      statusTxt.textContent = 'Realtime';
+      if (indicator) indicator.className = 'h-2 w-2 rounded-full bg-emerald-500';
+      if (statusTxt) statusTxt.textContent = 'Realtime';
     };
 
     sseSource.onmessage = (e) => {
@@ -57,8 +57,8 @@ function setupSSE() {
     };
 
     sseSource.onerror = () => {
-      indicator.className = 'h-2 w-2 rounded-full bg-amber-500';
-      statusTxt.textContent = 'Polling';
+      if (indicator) indicator.className = 'h-2 w-2 rounded-full bg-amber-500';
+      if (statusTxt) statusTxt.textContent = 'Polling';
     };
   }
 }
@@ -70,7 +70,8 @@ async function fetchSystemInfo() {
     if (data.success && data.local_ips.length > 0) {
       const ip = data.local_ips[0];
       const port = data.server_port || 3000;
-      document.getElementById('server-ip-text').textContent = `${ip}:${port}`;
+      const el = document.getElementById('server-ip-text');
+      if (el) el.textContent = `${ip}:${port}`;
     }
   } catch (err) {
     console.warn('[System] Không lấy được thông tin mạng:', err.message);
@@ -678,12 +679,19 @@ function switchTab(tabName) {
   ['booking', 'dashboard', 'simulator'].forEach(t => {
     const section = document.getElementById(`tab-${t}`);
     const btn = document.getElementById(`tab-btn-${t}`);
-    if (t === tabName) {
-      section.classList.remove('hidden');
-      btn.classList.add('active');
-    } else {
-      section.classList.add('hidden');
-      btn.classList.remove('active');
+    if (section) {
+      if (t === tabName) {
+        section.classList.remove('hidden');
+      } else {
+        section.classList.add('hidden');
+      }
+    }
+    if (btn) {
+      if (t === tabName) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
     }
   });
 

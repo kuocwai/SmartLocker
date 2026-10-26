@@ -13,6 +13,11 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Tuyến đường cho Bảng Quản Trị & Giám Sát
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
 // Quản lý SSE Clients (Server-Sent Events) để cập nhật thời gian thực
 let sseClients = [];
 
