@@ -170,14 +170,15 @@ app.post('/api/lockers/book', (req, res) => {
   const compartment_id = Number(req.body.compartment_id);
   const customer_name = req.body.customer_name || req.body.student_name || req.body.name;
   const customer_phone = req.body.customer_phone || req.body.student_phone || req.body.phone;
+  const student_id = req.body.student_id || req.body.mssv || '';
   const order_notes = req.body.order_notes || req.body.notes || '';
 
   if (!compartment_id || ![1, 2].includes(Number(compartment_id))) {
     return res.status(400).json({ success: false, message: 'Số ngăn tủ không hợp lệ (Phải là 1 hoặc 2)!' });
   }
 
-  if (!customer_name || !customer_phone) {
-    return res.status(400).json({ success: false, message: 'Vui lòng nhập đầy đủ Họ tên và Số điện thoại!' });
+  if (!customer_name || !customer_phone || !student_id) {
+    return res.status(400).json({ success: false, message: 'Vui lòng nhập đầy đủ Họ tên, MSSV và Số điện thoại!' });
   }
 
   const locker = db.getLocker(compartment_id);
@@ -204,12 +205,13 @@ app.post('/api/lockers/book', (req, res) => {
     compartment_id: Number(compartment_id),
     customer_name: customer_name.trim(),
     customer_phone: customer_phone.trim(),
+    student_id: student_id.trim().toUpperCase(),
     order_notes: (order_notes || '').trim(),
     otp_shipper,
     otp_student
   });
 
-  console.log(`[BOOKING] Đặt thành công Ngăn ${compartment_id} - Đơn #${order.id}`);
+  console.log(`[BOOKING] Đặt thành công Ngăn ${compartment_id} - Đơn #${order.id} - ${order.customer_name} (${order.student_id})`);
   console.log(`  -> Mã Shipper: ${otp_shipper} | Mã Sinh viên: ${otp_student}`);
 
   broadcastUpdate('LOCKER_BOOKED', { compartment_id, order });

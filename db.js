@@ -35,6 +35,7 @@ try {
       compartment_id INTEGER NOT NULL,
       customer_name TEXT NOT NULL,
       customer_phone TEXT NOT NULL,
+      student_id TEXT,
       order_notes TEXT,
       otp_shipper TEXT NOT NULL,
       otp_student TEXT NOT NULL,
@@ -46,6 +47,13 @@ try {
       warning_45m_sent INTEGER DEFAULT 0
     );
   `);
+
+  // Migration an toàn nếu bảng orders đã tồn tại từ trước mà chưa có cột student_id
+  try {
+    dbInstance.exec(`ALTER TABLE orders ADD COLUMN student_id TEXT;`);
+  } catch (mErr) {
+    // Cột đã tồn tại, bỏ qua
+  }
 
   // Khởi tạo 2 ngăn tủ nếu chưa có
   const checkLocker = dbInstance.prepare('SELECT COUNT(*) as count FROM lockers').get();
@@ -163,15 +171,16 @@ const db = {
     return this.getLocker(id);
   },
 
-  createOrder({ compartment_id, customer_name, customer_phone, order_notes, otp_shipper, otp_student }) {
+  createOrder({ compartment_id, customer_name, customer_phone, student_id, order_notes, otp_shipper, otp_student }) {
     compartment_id = Number(compartment_id);
     const now = Date.now();
+    const cleanStudentId = (student_id || '').trim().toUpperCase();
     if (useSqlite) {
       const stmt = dbInstance.prepare(`
-        INSERT INTO orders (compartment_id, customer_name, customer_phone, order_notes, otp_shipper, otp_student, status, created_at, warning_45m_sent)
-        VALUES (?, ?, ?, ?, ?, ?, 'WAITING_DELIVERY', ?, 0)
+        INSERT INTO orders (compartment_id, customer_name, customer_phone, student_id, order_notes, otp_shipper, otp_student, status, created_at, warning_45m_sent)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'WAITING_DELIVERY', ?, 0)
       `);
-      const info = stmt.run(compartment_id, customer_name, customer_phone, order_notes || '', otp_shipper, otp_student, now);
+      const info = stmt.run(compartment_id, customer_name, customer_phone, cleanStudentId, order_notes || '', otp_shipper, otp_student, now);
       const orderId = Number(info.lastInsertRowid);
 
       // Cập nhật ngăn tủ
@@ -188,6 +197,7 @@ const db = {
         compartment_id,
         customer_name,
         customer_phone,
+        student_id: cleanStudentId,
         order_notes: order_notes || '',
         otp_shipper,
         otp_student,

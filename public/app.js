@@ -162,9 +162,10 @@ function renderBookingTab(lockers) {
 
       if (locker.active_order) {
         orderBox.classList.remove('hidden');
+        const stId = locker.active_order.student_id ? ` (${escapeHtml(locker.active_order.student_id)})` : '';
         orderBox.innerHTML = `
           <div class="flex justify-between font-semibold text-slate-800">
-            <span>Đơn #${locker.active_order.id}: ${escapeHtml(locker.active_order.customer_name)}</span>
+            <span>Đơn #${locker.active_order.id}: ${escapeHtml(locker.active_order.customer_name)}${stId}</span>
             <span class="text-amber-700">Mã Shipper: <strong class="font-mono text-sm">${locker.active_order.otp_shipper}</strong></span>
           </div>
           <p class="text-slate-500">${escapeHtml(locker.active_order.order_notes || 'Không có ghi chú')}</p>
@@ -186,9 +187,10 @@ function renderBookingTab(lockers) {
 
       if (locker.active_order) {
         orderBox.classList.remove('hidden');
+        const stId = locker.active_order.student_id ? ` [${escapeHtml(locker.active_order.student_id)}]` : '';
         orderBox.innerHTML = `
           <div class="flex justify-between font-semibold text-slate-800">
-            <span>Người nhận: ${escapeHtml(locker.active_order.customer_name)} (${locker.active_order.customer_phone})</span>
+            <span>Người nhận: ${escapeHtml(locker.active_order.customer_name)}${stId} (${locker.active_order.customer_phone})</span>
             <span class="text-emerald-700">Mã SV: <strong class="font-mono text-sm">${locker.active_order.otp_student}</strong></span>
           </div>
           <div class="flex justify-between items-center pt-1 border-t border-slate-200/60 mt-1">
@@ -315,12 +317,13 @@ function renderDashboardTab(lockers) {
     // Order Info Box
     if (locker.active_order) {
       const o = locker.active_order;
+      const stId = o.student_id ? ` [${escapeHtml(o.student_id)}]` : '';
       orderInfo.innerHTML = `
         <div class="flex justify-between items-center font-bold text-slate-800">
           <span>Đơn hàng #${o.id}</span>
           <span class="text-xs text-slate-400">${new Date(o.created_at).toLocaleTimeString('vi-VN')}</span>
         </div>
-        <div><strong>Người nhận:</strong> ${escapeHtml(o.customer_name)} - ${escapeHtml(o.customer_phone)}</div>
+        <div><strong>Người nhận:</strong> ${escapeHtml(o.customer_name)}${stId} - ${escapeHtml(o.customer_phone)}</div>
         ${o.order_notes ? `<div><strong>Ghi chú:</strong> ${escapeHtml(o.order_notes)}</div>` : ''}
         <div class="pt-1.5 flex gap-2 font-mono text-[11px]">
           <span class="bg-amber-100 text-amber-900 px-2 py-0.5 rounded">Mã Shipper: <b>${o.otp_shipper}</b></span>
@@ -338,7 +341,7 @@ function renderHistoryTable(orders) {
   if (!tbody) return;
 
   if (!orders || orders.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-400 italic">Chưa có lịch sử đơn hàng nào.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-400 italic">Chưa có lịch sử đơn hàng nào.</td></tr>`;
     return;
   }
 
@@ -361,6 +364,7 @@ function renderHistoryTable(orders) {
         <td class="py-3 px-4 font-mono font-bold text-slate-900">#${order.id}</td>
         <td class="py-3 px-4 font-semibold text-slate-800">Ngăn ${order.compartment_id}</td>
         <td class="py-3 px-4 font-medium">${escapeHtml(order.customer_name)}</td>
+        <td class="py-3 px-4 font-mono font-semibold text-slate-700">${escapeHtml(order.student_id || '-')}</td>
         <td class="py-3 px-4 text-slate-500 font-mono">${escapeHtml(order.customer_phone)}</td>
         <td class="py-3 px-4">${statusBadge}</td>
         <td class="py-3 px-4 text-slate-400 text-xs">${timeStr}</td>
@@ -446,12 +450,13 @@ function closeBookingModal() {
 async function handleBookingSubmit(e) {
   e.preventDefault();
   const name = document.getElementById('input-name').value.trim();
+  const studentId = (document.getElementById('input-student-id').value || '').trim().toUpperCase();
   const phone = document.getElementById('input-phone').value.trim();
   const notes = document.getElementById('input-notes').value.trim();
   const btnSubmit = document.getElementById('btn-submit-booking');
 
-  if (!name || !phone) {
-    showToast('Vui lòng nhập họ tên và số điện thoại!', 'error');
+  if (!name || !studentId || !phone) {
+    showToast('Vui lòng nhập đầy đủ Họ tên, MSSV và Số điện thoại!', 'error');
     return;
   }
 
@@ -465,6 +470,7 @@ async function handleBookingSubmit(e) {
       body: JSON.stringify({
         compartment_id: currentBookingCompId,
         customer_name: name,
+        student_id: studentId,
         customer_phone: phone,
         order_notes: notes
       })
@@ -492,7 +498,11 @@ function showOtpResultModal(data) {
   document.getElementById('res-otp-shipper').textContent = data.otp_shipper;
   document.getElementById('res-otp-student').textContent = data.otp_student;
 
-  currentShipperMessage = `Em gửi đồ ở Tủ SmartLocker cổng trường - Ngăn ${data.compartment_id}, mã mở tủ của anh là ${data.otp_shipper} nhé anh.`;
+  const stName = (data.order && data.order.customer_name) ? data.order.customer_name : '';
+  const stId = (data.order && data.order.student_id) ? ` (${data.order.student_id})` : '';
+  const prefix = stName ? `Em ${stName}${stId}` : 'Em';
+
+  currentShipperMessage = `${prefix} gửi đồ ở Tủ SmartLocker cổng trường - Ngăn ${data.compartment_id}, mã mở tủ của anh là ${data.otp_shipper} nhé anh.`;
   document.getElementById('preview-shipper-msg').textContent = currentShipperMessage;
 
   document.getElementById('otp-result-modal').classList.remove('hidden');
