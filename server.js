@@ -93,7 +93,7 @@ app.get('/admin', (req, res) => {
 });
 
 // Quản lý SSE Clients (Server-Sent Events) để cập nhật thời gian thực
-let sseClients = [];
+const sseClients = new Set();
 
 function broadcastUpdate(eventType = 'UPDATE', payload = {}) {
   const data = JSON.stringify({ event: eventType, payload, timestamp: Date.now() });
@@ -169,7 +169,7 @@ function enrichLockerWithSLA(locker) {
 
     if (elapsedMs >= SLA_TIMEOUT_MS) {
       stage = 'ABANDONED';
-      message = 'QUÁ HẠN LƯU TRỮ (120 phút)! Đơn hàng bị hủy để an toàn.';
+      message = 'QUÁ HẠN LƯU TRỮ (120 phút)! Cần kiểm tra và xử lý hàng trong ngăn.';
     } else if (elapsedMs >= SLA_WARN_MS) {
       stage = 'WARNING';
       message = 'CẢNH BÁO CẤP 1 (45 phút): Đồ ăn sắp nguội, sinh viên cần lấy gấp!';
@@ -192,7 +192,7 @@ function enrichLockerWithSLA(locker) {
       total_limit_seconds: SLA_TIMEOUT_MIN * 60,
       percent: 100,
       stage: 'ABANDONED',
-      message: 'QUÁ HẠN LƯU TRỮ! Tủ đã khóa hủy đơn.'
+      message: 'QUÁ HẠN LƯU TRỮ! Ngăn chưa được giải phóng; cần xử lý thủ công.'
     };
   }
 
@@ -203,6 +203,7 @@ function enrichLockerWithSLA(locker) {
 // VÒNG LẶP THEO DÕI AN TOÀN THỰC PHẨM (SLA)
 // ==========================================
 setInterval(() => {
+  try {
   const storedOrders = db.getActiveStoredOrders();
   const now = Date.now();
   let hasChange = false;
@@ -223,13 +224,7 @@ setInterval(() => {
     // Mốc 120 phút: Quá hạn lưu trữ -> ABANDONED
     if (elapsedMs >= SLA_TIMEOUT_MS) {
       console.log(`[SLA] Ngăn ${order.compartment_id} vượt mốc 120 phút! Chuyển trạng thái sang ABANDONED.`);
-      db.updateOrder(order.id, {
-        status: 'ABANDONED',
-        abandoned_at: now
-      });
-      db.updateLocker(order.compartment_id, {
-        status: 'ABANDONED'
-      });
+      db.transitionOrderAndLocker(order.id, { status: 'ABANDONED', abandoned_at: now }, order.compartment_id, { status: 'ABANDONED' });
       hasChange = true;
     }
   });
@@ -237,6 +232,7 @@ setInterval(() => {
   if (hasChange) {
     broadcastUpdate('SLA_TICK', { timestamp: now });
   }
+  } catch (err) { console.error('[SLA] Tick failed; no partial state should be committed:', err); }
 }, 5000);
 
 // ==========================================
@@ -481,15 +477,13 @@ app.post('/api/locker/update-status', requireDeviceOrAdmin, (req, res) => {
 
   const now = Date.now();
   if (isDeposit) {
-    db.updateOrder(activeOrder.id, { status: 'STORED', stored_at: now });
-    db.updateLocker(compId, { status: 'STORED', door_state: 'CLOSED', item_state: 'DETECTED' });
+    db.transitionOrderAndLocker(activeOrder.id, { status: 'STORED', stored_at: now }, compId, { status: 'STORED', door_state: 'CLOSED', item_state: 'DETECTED' });
     pendingTransitions.delete(compId);
     broadcastUpdate('ITEM_STORED', { compartment_id: compId });
     return res.json({ success: true, locker_status: 'STORED', message: `Ngăn ${compId} đã có hàng. Bắt đầu đếm giờ lưu trữ.` });
   }
 
-  db.updateOrder(activeOrder.id, { status: 'COMPLETED', completed_at: now });
-  db.updateLocker(compId, { status: 'AVAILABLE', door_state: 'CLOSED', item_state: 'EMPTY', active_order_id: null });
+  db.transitionOrderAndLocker(activeOrder.id, { status: 'COMPLETED', completed_at: now }, compId, { status: 'AVAILABLE', door_state: 'CLOSED', item_state: 'EMPTY', active_order_id: null });
   pendingTransitions.delete(compId);
   broadcastUpdate('ITEM_PICKED', { compartment_id: compId });
   return res.json({ success: true, locker_status: 'AVAILABLE', message: `Đơn hàng hoàn tất. Ngăn ${compId} đã sẵn sàng.` });
@@ -538,6 +532,9 @@ app.get('/api/orders/history', requireAdmin, (req, res) => {
 
 // 7. Reset toàn bộ 2 ngăn tủ về AVAILABLE (Dành cho demo / thuyết trình)
 app.post('/api/lockers/reset', requireAdmin, (req, res) => {
+  if (db.getLockers().some(l => l.item_state === 'DETECTED' || l.status === 'STORED' || l.status === 'ABANDONED')) {
+    return res.status(409).json({ success: false, message: 'Tủ còn hàng hoặc đơn quá hạn; cần kiểm tra và xử lý thủ công trước khi reset.' });
+  }
   const resetLockers = db.resetAllLockers().map(enrichLockerWithSLA);
   console.log('[RESET] Đã đặt lại toàn bộ ngăn tủ về AVAILABLE.');
   broadcastUpdate('LOCKERS_RESET');
@@ -612,9 +609,8 @@ app.get('/api/events', (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
 
-  const clientId = Date.now();
-  const newClient = { id: clientId, res };
-  sseClients.push(newClient);
+  const newClient = { res };
+  sseClients.add(newClient);
 
   // Gửi heartbeat định kỳ
   const heartbeat = setInterval(() => {
@@ -623,7 +619,7 @@ app.get('/api/events', (req, res) => {
 
   req.on('close', () => {
     clearInterval(heartbeat);
-    sseClients = sseClients.filter(c => c.id !== clientId);
+    sseClients.delete(newClient);
   });
 });
 
