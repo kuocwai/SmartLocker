@@ -7,6 +7,7 @@ let currentBookingCompId = 1;
 let currentShipperMessage = '';
 let activeTab = 'booking';
 let sseSource = null;
+let sseConnected = false;
 let adminKey = ''; // Only in memory; do not use localStorage or query strings.
 const isAdminPage = /(?:^|\/)admin(?:\.html)?$/.test(window.location.pathname);
 
@@ -42,10 +43,10 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchSystemInfo();
   fetchHistory();
 
-  // Polling dự phòng mỗi 3 giây nếu SSE gặp sự cố
+  // Use periodic polling ONLY if SSE is unavailable/disconnected.
   setInterval(() => {
-    fetchLockerData(false);
-  }, 3000);
+    if (!sseConnected) fetchLockerData(false);
+  }, 10000);
 
   // Cập nhật nhịp đếm SLA mỗi giây
   setInterval(updateLiveSlaTimers, 1000);
@@ -67,6 +68,9 @@ function setupSSE() {
     sseSource = new EventSource('/api/events');
 
     sseSource.onopen = () => {
+      sseConnected = true;
+      fetchLockerData(false); // reconcile state after reconnect
+      fetchHistory();
       if (indicator) indicator.className = 'h-2 w-2 rounded-full bg-emerald-500';
       if (statusTxt) statusTxt.textContent = 'Realtime';
     };
@@ -83,6 +87,7 @@ function setupSSE() {
     };
 
     sseSource.onerror = () => {
+      sseConnected = false;
       if (indicator) indicator.className = 'h-2 w-2 rounded-full bg-amber-500';
       if (statusTxt) statusTxt.textContent = 'Polling';
     };
@@ -384,7 +389,7 @@ function renderHistoryTable(orders) {
     if (order.status === 'COMPLETED') {
       statusBadge = '<span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">HOÀN TẤT</span>';
     } else if (order.status === 'ABANDONED') {
-      statusBadge = '<span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">QUÁ HẠN (HỦY)</span>';
+      statusBadge = '<span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">QUÁ HẠN (CẦN XỬ LÝ)</span>';
     } else if (order.status === 'STORED') {
       statusBadge = '<span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">ĐANG LƯU</span>';
     } else {
@@ -435,7 +440,7 @@ function checkGlobalSLAWarnings(lockers) {
     alertBox.classList.remove('hidden');
     if (warnedLocker.sla.stage === 'ABANDONED') {
       alertBox.className = 'rounded-2xl p-4 bg-rose-50 border border-rose-300 text-rose-900 shadow-sm flex items-start gap-3.5 transition-all';
-      alertTxt.textContent = `Ngăn ${warnedLocker.id} đã lưu trữ vượt quá 120 phút! Món ăn đã bị hủy để đảm bảo an toàn thực phẩm.`;
+      alertTxt.textContent = `Ngăn ${warnedLocker.id} đã lưu trữ vượt quá 120 phút! Cần kiểm tra và xử lý thủ công, không tự giải phóng ngăn.`;
     } else {
       alertBox.className = 'rounded-2xl p-4 bg-amber-50 border border-amber-300 text-amber-900 shadow-sm flex items-start gap-3.5 transition-all';
       alertTxt.textContent = `Ngăn ${warnedLocker.id} đã lưu trữ hơn 45 phút! Đồ ăn sắp nguội, vui lòng nhắc nhở sinh viên đến nhận.`;

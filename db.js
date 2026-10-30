@@ -1,25 +1,32 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('node:crypto');
 
-// Đảm bảo thư mục data/ tồn tại
-const dataDir = path.join(__dirname, 'data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+// Persistent storage selection is sticky: never silently move an existing data set.
+// In production, an ambiguous or unreadable store fails closed (no automatic reset).
+const dataDir = path.resolve(process.env.SMARTLOCKER_DATA_DIR || path.join(__dirname, 'data'));
+const requestedMode = String(process.env.SMARTLOCKER_DB_MODE || 'auto').toLowerCase();
+if (!['auto', 'sqlite', 'json'].includes(requestedMode)) throw Error('[DB] Invalid SMARTLOCKER_DB_MODE');
+fs.mkdirSync(dataDir, { recursive: true });
+const sqliteFile = path.join(dataDir, 'smartlocker.db');
+const jsonFile = path.join(dataDir, 'smartlocker.json');
+const sqliteExists = fs.existsSync(sqliteFile);
+const jsonExists = fs.existsSync(jsonFile);
+if (requestedMode === 'auto' && sqliteExists && jsonExists) {
+  throw Error('[DB] Both SQLite and JSON data stores exist. Select SMARTLOCKER_DB_MODE explicitly after manual verification; no automatic migration.');
 }
-
+if (requestedMode === 'json' && sqliteExists && !jsonExists) throw Error('[DB] Existing SQLite database cannot be silently replaced with a new JSON store');
+if (requestedMode === 'sqlite' && jsonExists && !sqliteExists) throw Error('[DB] Existing JSON database cannot be silently replaced with a new SQLite store');
+let Database = null;
+let sqliteUnavailable = null;
+try { Database = require('better-sqlite3'); } catch (err) { sqliteUnavailable = err; }
+const useSqlite = requestedMode === 'sqlite' || (requestedMode === 'auto' && (sqliteExists || (!jsonExists && Boolean(Database))));
+if (useSqlite && !Database) throw Error('[DB] SQLite data selected but better-sqlite3 unavailable: '+ sqliteUnavailable?.message);
 let dbInstance = null;
-let useSqlite = false;
-
-// Thử nạp better-sqlite3, nếu không có sẽ tự động dùng JSON store
-try {
-  const Database = require('better-sqlite3');
-  const dbPath = path.join(dataDir, 'smartlocker.db');
-  dbInstance = new Database(dbPath);
+if (useSqlite) {
+  // Do not fall back to JSON on SQLite corruption/permission/initialization errors.
+  dbInstance = new Database(sqliteFile);
   dbInstance.pragma('journal_mode = WAL');
-  useSqlite = true;
-  console.log('[DB] Kết nối SQLite thành công:', dbPath);
-
-  // Tạo bảng Lockers
   dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS lockers (
       id INTEGER PRIMARY KEY,
@@ -29,7 +36,6 @@ try {
       item_state TEXT NOT NULL DEFAULT 'EMPTY',
       active_order_id INTEGER
     );
-
     CREATE TABLE IF NOT EXISTS orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       compartment_id INTEGER NOT NULL,
@@ -47,61 +53,76 @@ try {
       warning_45m_sent INTEGER DEFAULT 0
     );
   `);
-
-  // Migration an toàn nếu bảng orders đã tồn tại từ trước mà chưa có cột student_id
-  try {
-    dbInstance.exec(`ALTER TABLE orders ADD COLUMN student_id TEXT;`);
-  } catch (mErr) {
-    // Cột đã tồn tại, bỏ qua
+  const columns = dbInstance.prepare('PRAGMA table_info(orders)').all().map(c => c.name);
+  if (!columns.includes('student_id')) dbInstance.exec('ALTER TABLE orders ADD COLUMN student_id TEXT');
+  if (!columns.includes('warning_45m_sent')) dbInstance.exec('ALTER TABLE orders ADD COLUMN warning_45m_sent INTEGER DEFAULT 0');
+  const count = dbInstance.prepare('SELECT COUNT(*) AS count FROM lockers').get().count;
+  if (count === 0) {
+    dbInstance.transaction(() => {
+      const insert = dbInstance.prepare("INSERT INTO lockers (id, name, status, door_state, item_state, active_order_id) VALUES (?, ?, 'AVAILABLE', 'CLOSED', 'EMPTY', NULL)");
+      insert.run(1, 'Ngăn 1 (Tầng trên)');
+      insert.run(2, 'Ngăn 2 (Tầng dưới)');
+    })();
   }
-
-  // Khởi tạo 2 ngăn tủ nếu chưa có
-  const checkLocker = dbInstance.prepare('SELECT COUNT(*) as count FROM lockers').get();
-  if (checkLocker.count === 0) {
-    const insertLocker = dbInstance.prepare(`
-      INSERT INTO lockers (id, name, status, door_state, item_state, active_order_id)
-      VALUES (?, ?, 'AVAILABLE', 'CLOSED', 'EMPTY', NULL)
-    `);
-    insertLocker.run(1, 'Ngăn 1 (Tầng trên)');
-    insertLocker.run(2, 'Ngăn 2 (Tầng dưới)');
-    console.log('[DB] Đã khởi tạo 2 ngăn tủ mẫu (Ngăn 1 & Ngăn 2).');
-  }
-
-} catch (err) {
-  // Khi chạy trên máy tính không có C++ Build Tools (hoặc phiên bản Node.js mới như v24),
-  // hệ thống sẽ tự động kích hoạt cơ chế JSON File Store để đảm bảo 100% không bao giờ bị lỗi.
-  console.log('[DB] Cơ chế lưu trữ: JSON File Database (Bền vững, tương thích mọi môi trường)');
-  useSqlite = false;
+  // Existing data must be reviewed, never silently rewritten.
+  const lockerIds = dbInstance.prepare('SELECT id FROM lockers ORDER BY id').all().map(row => row.id);
+  if (lockerIds.length !== 2 || lockerIds[0] !== 1 || lockerIds[1] !== 2) throw Error('[DB] SQLite must have exactly lockers 1 and 2');
+  const invalid = dbInstance.prepare("SELECT l.id FROM lockers l LEFT JOIN orders o ON o.id=l.active_order_id WHERE (l.active_order_id IS NULL AND l.status != 'AVAILABLE') OR (l.active_order_id IS NOT NULL AND (l.status = 'AVAILABLE' OR o.id IS NULL OR o.compartment_id != l.id OR o.status != l.status)) LIMIT 1").get();
+  if (invalid) throw Error('[DB] Inconsistent SQLite locker/order references; manual recovery required');
+  console.log('[DB] SQLite:', sqliteFile);
+} else {
+  console.log('[DB] JSON:', jsonFile);
 }
-
-// ==========================================
-// FALLBACK JSON STORE (Nếu không dùng SQLite)
-// ==========================================
-const jsonFile = path.join(dataDir, 'smartlocker.json');
-let jsonData = {
+const initialJson = () => ({
   lockers: [
     { id: 1, name: 'Ngăn 1 (Tầng trên)', status: 'AVAILABLE', door_state: 'CLOSED', item_state: 'EMPTY', active_order_id: null },
     { id: 2, name: 'Ngăn 2 (Tầng dưới)', status: 'AVAILABLE', door_state: 'CLOSED', item_state: 'EMPTY', active_order_id: null }
   ],
   orders: []
-};
-
-if (!useSqlite) {
-  if (fs.existsSync(jsonFile)) {
-    try {
-      jsonData = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
-    } catch (e) {
-      console.error('[DB] Lỗi đọc JSON data, dùng dữ liệu mặc định');
-    }
-  } else {
-    fs.writeFileSync(jsonFile, JSON.stringify(jsonData, null, 2), 'utf8');
+});
+function validateJson(value) {
+  if (!value || !Array.isArray(value.lockers) || !Array.isArray(value.orders)) throw Error('[DB] Invalid JSON store structure');
+  if (value.lockers.length !== 2 || ![1,2].every(id => value.lockers.some(l => l && l.id === id))) throw Error('[DB] JSON must contain lockers 1 and 2');
+  const ids = new Set();
+  for (const order of value.orders) {
+    if (!order || !Number.isSafeInteger(order.id) || order.id < 1 || ids.has(order.id) || ![1,2].includes(order.compartment_id) || !['WAITING_DELIVERY','STORED','COMPLETED','ABANDONED','CANCELLED'].includes(order.status) || !Number.isFinite(order.created_at) || typeof order.otp_shipper !== 'string' || typeof order.otp_student !== 'string') throw Error('[DB] Invalid JSON order record');
+    ids.add(order.id);
+  }
+  for (const locker of value.lockers) {
+    if (!['AVAILABLE','WAITING_DELIVERY','STORED','ABANDONED'].includes(locker.status) || !['OPEN','CLOSED'].includes(locker.door_state) || !['EMPTY','DETECTED'].includes(locker.item_state)) throw Error('[DB] Invalid JSON locker state');
+    const active = locker.active_order_id;
+    if (active == null) { if (locker.status !== 'AVAILABLE') throw Error('[DB] Active locker missing order'); continue; }
+    const order = value.orders.find(o => o.id === active);
+    if (locker.status === 'AVAILABLE' || !order || order.compartment_id !== locker.id || order.status !== locker.status) throw Error('[DB] Inconsistent JSON locker/order references');
   }
 }
-
-function saveJson() {
-  if (!useSqlite) {
-    fs.writeFileSync(jsonFile, JSON.stringify(jsonData, null, 2), 'utf8');
+let jsonData = initialJson();
+if (!useSqlite) {
+  if (jsonExists) {
+    // Corruption is fatal; NEVER fall back to an empty store on a parse error.
+    jsonData = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
+    validateJson(jsonData);
+  } else {
+    saveJsonSnapshot(jsonData);
   }
+}
+function saveJsonSnapshot(next) {
+  validateJson(next);
+  const temp = path.join(dataDir, '.smartlocker-' + process.pid + '-' + crypto.randomBytes(8).toString('hex') + '.tmp');
+  try {
+    fs.writeFileSync(temp, JSON.stringify(next, null, 2), { encoding: 'utf8', flag: 'wx', flush: true });
+    fs.renameSync(temp, jsonFile);
+  } catch (err) {
+    try { fs.unlinkSync(temp); } catch (_) {}
+    throw err;
+  }
+}
+function commitJson(mutate) {
+  const next = structuredClone(jsonData);
+  const result = mutate(next);
+  saveJsonSnapshot(next);
+  jsonData = next;
+  return result;
 }
 
 // ==========================================
@@ -155,18 +176,20 @@ const db = {
 
   updateLocker(id, fields) {
     id = Number(id);
+    const allowed = new Set(['status', 'door_state', 'item_state', 'active_order_id']);
+    const keys = Object.keys(fields);
+    if (keys.some(k => !allowed.has(k))) throw Error('[DB] Invalid locker update field');
+    if (keys.length === 0) return this.getLocker(id);
     if (useSqlite) {
-      const keys = Object.keys(fields);
-      if (keys.length === 0) return;
-      const setClause = keys.map(k => `${k} = ?`).join(', ');
+      const clause = keys.map(k => k + ' = ?').join(', ');
       const values = keys.map(k => fields[k]);
-      dbInstance.prepare(`UPDATE lockers SET ${setClause} WHERE id = ?`).run(...values, id);
+      dbInstance.prepare('UPDATE lockers SET ' + clause + ' WHERE id = ?').run(...values, id);
     } else {
-      const locker = jsonData.lockers.find(l => l.id === id);
-      if (locker) {
+      commitJson(next => {
+        const locker = next.lockers.find(l => l.id === id);
+        if (!locker) throw Error('[DB] Locker not found');
         Object.assign(locker, fields);
-        saveJson();
-      }
+      });
     }
     return this.getLocker(id);
   },
@@ -177,46 +200,25 @@ const db = {
     const cleanStudentId = (student_id || '').trim().toUpperCase();
     const cleanCustomerName = (customer_name || 'Khách hàng ' + customer_phone).trim();
     if (useSqlite) {
-      const stmt = dbInstance.prepare(`
-        INSERT INTO orders (compartment_id, customer_name, customer_phone, student_id, order_notes, otp_shipper, otp_student, status, created_at, warning_45m_sent)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'WAITING_DELIVERY', ?, 0)
-      `);
-      const info = stmt.run(compartment_id, cleanCustomerName, customer_phone, cleanStudentId, order_notes || '', otp_shipper, otp_student, now);
-      const orderId = Number(info.lastInsertRowid);
-
-      // Cập nhật ngăn tủ
-      this.updateLocker(compartment_id, {
-        status: 'WAITING_DELIVERY',
-        active_order_id: orderId
-      });
-
-      return dbInstance.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
-    } else {
-      const nextId = jsonData.orders.length > 0 ? Math.max(...jsonData.orders.map(o => o.id)) + 1 : 1;
-      const order = {
-        id: nextId,
-        compartment_id,
-        customer_name: cleanCustomerName,
-        customer_phone,
-        student_id: cleanStudentId,
-        order_notes: order_notes || '',
-        otp_shipper,
-        otp_student,
-        status: 'WAITING_DELIVERY',
-        created_at: now,
-        stored_at: null,
-        completed_at: null,
-        abandoned_at: null,
-        warning_45m_sent: 0
-      };
-      jsonData.orders.push(order);
-      this.updateLocker(compartment_id, {
-        status: 'WAITING_DELIVERY',
-        active_order_id: order.id
-      });
-      saveJson();
-      return order;
+      return dbInstance.transaction(() => {
+        const current = dbInstance.prepare('SELECT status FROM lockers WHERE id=?').get(compartment_id);
+        if (!current || current.status !== 'AVAILABLE') throw Error('[DB] Locker is not available');
+        const info = dbInstance.prepare(`INSERT INTO orders (compartment_id, customer_name, customer_phone, student_id, order_notes, otp_shipper, otp_student, status, created_at, warning_45m_sent) VALUES (?, ?, ?, ?, ?, ?, ?, 'WAITING_DELIVERY', ?, 0)`).run(compartment_id, cleanCustomerName, customer_phone, cleanStudentId, order_notes || '', otp_shipper, otp_student, now);
+        const orderId = Number(info.lastInsertRowid);
+        dbInstance.prepare("UPDATE lockers SET status='WAITING_DELIVERY', active_order_id=? WHERE id=?").run(orderId, compartment_id);
+        return dbInstance.prepare('SELECT * FROM orders WHERE id=?').get(orderId);
+      })();
     }
+    return commitJson(next => {
+      const locker = next.lockers.find(l => l.id === compartment_id);
+      if (!locker || locker.status !== 'AVAILABLE') throw Error('[DB] Locker is not available');
+      const nextId = next.orders.reduce((max, o) => Math.max(max, o.id), 0) + 1;
+      const order = { id: nextId, compartment_id, customer_name: cleanCustomerName, customer_phone, student_id: cleanStudentId, order_notes: order_notes || '', otp_shipper, otp_student, status: 'WAITING_DELIVERY', created_at: now, stored_at: null, completed_at: null, abandoned_at: null, warning_45m_sent: 0 };
+      next.orders.push(order);
+      locker.status = 'WAITING_DELIVERY';
+      locker.active_order_id = order.id;
+      return order;
+    });
   },
 
   getOrderById(id) {
@@ -278,28 +280,58 @@ const db = {
 
   updateOrder(id, fields) {
     id = Number(id);
+    const allowed = new Set(['status','created_at','stored_at','completed_at','abandoned_at','warning_45m_sent']);
+    const keys = Object.keys(fields);
+    if (keys.some(k => !allowed.has(k))) throw Error('[DB] Invalid order update field');
+    if (keys.length === 0) return this.getOrderById(id);
     if (useSqlite) {
-      const keys = Object.keys(fields);
-      if (keys.length === 0) return;
-      const setClause = keys.map(k => `${k} = ?`).join(', ');
-      const values = keys.map(k => fields[k]);
-      dbInstance.prepare(`UPDATE orders SET ${setClause} WHERE id = ?`).run(...values, id);
-      return this.getOrderById(id);
+      const clause = keys.map(k => k + ' = ?').join(', ');
+      dbInstance.prepare('UPDATE orders SET ' + clause + ' WHERE id = ?').run(...keys.map(k => fields[k]), id);
     } else {
-      const order = jsonData.orders.find(o => o.id === id);
-      if (order) {
+      commitJson(next => {
+        const order = next.orders.find(o => o.id === id);
+        if (!order) throw Error('[DB] Order not found');
         Object.assign(order, fields);
-        saveJson();
-      }
-      return order;
+      });
+    }
+    return this.getOrderById(id);
+  },
+
+  transitionOrderAndLocker(orderId, orderFields, compartmentId, lockerFields) {
+    orderId = Number(orderId); compartmentId = Number(compartmentId);
+    const orderKeys = Object.keys(orderFields), lockerKeys = Object.keys(lockerFields);
+    const allowedOrder = new Set(['status','stored_at','completed_at','abandoned_at','warning_45m_sent']);
+    const allowedLocker = new Set(['status','door_state','item_state','active_order_id']);
+    if (orderKeys.some(k => !allowedOrder.has(k)) || lockerKeys.some(k => !allowedLocker.has(k))) throw Error('[DB] Invalid transition fields');
+    if (useSqlite) {
+      dbInstance.transaction(() => {
+        const current = dbInstance.prepare('SELECT active_order_id FROM lockers WHERE id=?').get(compartmentId);
+        if (!current || current.active_order_id !== orderId) throw Error('[DB] Active order mismatch');
+        if (orderKeys.length) {
+          const clause = orderKeys.map(k => k + ' = ?').join(', ');
+          dbInstance.prepare('UPDATE orders SET ' + clause + ' WHERE id=?').run(...orderKeys.map(k => orderFields[k]), orderId);
+        }
+        if (lockerKeys.length) {
+          const clause = lockerKeys.map(k => k + ' = ?').join(', ');
+          dbInstance.prepare('UPDATE lockers SET ' + clause + ' WHERE id=?').run(...lockerKeys.map(k => lockerFields[k]), compartmentId);
+        }
+      })();
+    } else {
+      commitJson(next => {
+        const locker = next.lockers.find(l => l.id === compartmentId);
+        const order = next.orders.find(o => o.id === orderId);
+        if (!locker || !order || locker.active_order_id !== orderId) throw Error('[DB] Active order mismatch');
+        Object.assign(order, orderFields);
+        Object.assign(locker, lockerFields);
+      });
     }
   },
 
   getActiveStoredOrders() {
     if (useSqlite) {
-      return dbInstance.prepare("SELECT * FROM orders WHERE status = 'STORED'").all();
+      return dbInstance.prepare("SELECT o.* FROM orders o JOIN lockers l ON l.active_order_id=o.id AND l.id=o.compartment_id AND l.status='STORED' WHERE o.status='STORED'").all();
     } else {
-      return jsonData.orders.filter(o => o.status === 'STORED');
+      return jsonData.orders.filter(o => o.status === 'STORED' && jsonData.lockers.some(l => l.id === o.compartment_id && l.status === 'STORED' && l.active_order_id === o.id));
     }
   },
 
@@ -320,28 +352,15 @@ const db = {
   resetAllLockers() {
     const now = Date.now();
     if (useSqlite) {
-      dbInstance.prepare(`
-        UPDATE orders SET status = 'CANCELLED', completed_at = ?
-        WHERE status IN ('WAITING_DELIVERY', 'STORED')
-      `).run(now);
-
-      dbInstance.prepare(`
-        UPDATE lockers SET status = 'AVAILABLE', door_state = 'CLOSED', item_state = 'EMPTY', active_order_id = NULL
-      `).run();
+      dbInstance.transaction(() => {
+        dbInstance.prepare("UPDATE orders SET status='CANCELLED', completed_at=? WHERE status IN ('WAITING_DELIVERY','STORED','ABANDONED')").run(now);
+        dbInstance.prepare("UPDATE lockers SET status='AVAILABLE', door_state='CLOSED', item_state='EMPTY', active_order_id=NULL").run();
+      })();
     } else {
-      jsonData.orders.forEach(o => {
-        if (['WAITING_DELIVERY', 'STORED'].includes(o.status)) {
-          o.status = 'CANCELLED';
-          o.completed_at = now;
-        }
+      commitJson(next => {
+        for (const order of next.orders) if (['WAITING_DELIVERY','STORED','ABANDONED'].includes(order.status)) { order.status = 'CANCELLED'; order.completed_at = now; }
+        for (const locker of next.lockers) Object.assign(locker, { status: 'AVAILABLE', door_state: 'CLOSED', item_state: 'EMPTY', active_order_id: null });
       });
-      jsonData.lockers.forEach(l => {
-        l.status = 'AVAILABLE';
-        l.door_state = 'CLOSED';
-        l.item_state = 'EMPTY';
-        l.active_order_id = null;
-      });
-      saveJson();
     }
     return this.getLockers();
   }
