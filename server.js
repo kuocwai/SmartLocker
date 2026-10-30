@@ -258,11 +258,73 @@ app.get('/api/lockers', (req, res) => {
 
 // 2. Sinh viên đặt ngăn tủ
 app.post('/api/lockers/book', (req, res) => {
+
+  // FIX 03: Strict compartment ID validation.
+  if (!validCompartmentId(req.body?.compartment_id)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Số ngăn tủ không hợp lệ (phải là 1 hoặc 2)!'
+    });
+  }
+
   const compartment_id = Number(req.body.compartment_id);
   const customer_phone = req.body.customer_phone || req.body.student_phone || req.body.phone;
   const customer_name = req.body.customer_name || req.body.student_name || req.body.name || customer_phone;
   const student_id = req.body.student_id || req.body.mssv || '';
   const order_notes = req.body.order_notes || req.body.notes || '';
+  
+  // FIX 03: Validate input types before using string methods.
+  const fieldsToValidate = {
+    customer_name,
+    customer_phone,
+    student_id,
+    order_notes
+  };
+
+  for (const [field, value] of Object.entries(fieldsToValidate)) {
+    if (typeof value !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: `${field} must be a string.`
+      });
+    }
+  }
+  
+  // FIX 03: Validate phone format and input lengths.
+  const cleanPhone = customer_phone.trim();
+  const cleanName = customer_name.trim();
+  const cleanStudentId = student_id.trim();
+  const cleanNotes = order_notes.trim();
+
+  // Accept Vietnamese mobile numbers: 0xxxxxxxxx or +84xxxxxxxxx.
+  if (!/^(?:0[35789]\d{8}|\+84[35789]\d{8})$/.test(cleanPhone)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Số điện thoại không hợp lệ!'
+    });
+  }
+
+  if (!cleanName || cleanName.length > 200) {
+    return res.status(400).json({
+      success: false,
+      message: 'Tên khách hàng không hợp lệ hoặc quá 200 ký tự!'
+    });
+  }
+
+  if (cleanStudentId.length > 100) {
+    return res.status(400).json({
+      success: false,
+      message: 'Mã sinh viên không được vượt quá 100 ký tự!'
+    });
+  }
+
+  if (cleanNotes.length > 1000) {
+    return res.status(400).json({
+      success: false,
+      message: 'Ghi chú không được vượt quá 1000 ký tự!'
+    });
+  }
+
 
   if (!compartment_id || ![1, 2].includes(Number(compartment_id))) {
     return res.status(400).json({ success: false, message: 'Số ngăn tủ không hợp lệ (Phải là 1 hoặc 2)!' });
@@ -434,8 +496,25 @@ app.post('/api/locker/update-status', requireDeviceOrAdmin, (req, res) => {
 });
 
 // 5. Đồng bộ cảm biến trực tiếp từ ESP32
+
 app.post('/api/locker/sensor-sync', requireDeviceOrAdmin, (req, res) => {
   const { compartment_id, door_state, item_state } = req.body;
+
+  // FIX 03: Require at least one sensor value.
+  if (door_state === undefined && item_state === undefined) {
+    return res.status(400).json({
+      success: false,
+      message: 'Phải cung cấp ít nhất một trạng thái cảm biến!'
+    });
+  }
+
+  if (!validCompartmentId(compartment_id)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Số ngăn tủ không hợp lệ!'
+    });
+  }
+
   if (!validCompartmentId(compartment_id)) {
     return res.status(400).json({ success: false, message: 'Số ngăn tủ không hợp lệ!' });
   }
@@ -469,7 +548,28 @@ app.post('/api/lockers/reset', requireAdmin, (req, res) => {
 app.post('/api/simulate/fast-forward', requireAdmin, (req, res) => {
   const { compartment_id, minutes } = req.body;
   const compId = Number(compartment_id || 1);
-  const addMinutes = Number(minutes || 45);
+  
+  // FIX 03: Validate fast-forward minutes.
+  // Keep the default of 45 minutes when omitted.
+  const rawMinutes = minutes === undefined ? 45 : minutes;
+
+  if (
+    (typeof rawMinutes !== 'number' &&
+      typeof rawMinutes !== 'string') ||
+    (typeof rawMinutes === 'string' &&
+      !/^[0-9]+$/.test(rawMinutes)) ||
+    !Number.isSafeInteger(Number(rawMinutes)) ||
+    Number(rawMinutes) < 1 ||
+    Number(rawMinutes) > 1440
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Số phút không hợp lệ (phải từ 1 đến 1440)!'
+    });
+  }
+
+  const addMinutes = Number(rawMinutes);
+
 
   const activeOrder = db.getActiveOrder(compId);
   if (!activeOrder || activeOrder.status !== 'STORED') {
