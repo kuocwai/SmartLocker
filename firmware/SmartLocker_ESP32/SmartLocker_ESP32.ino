@@ -235,7 +235,7 @@ void verifyOtpWithServer(String otpCode) {
 
   StaticJsonDocument<512> result;
   DeserializationError parseError = deserializeJson(result, response);
-  if (code != 200 || parseError || (result["status"] | "") != String("SUCCESS")) {
+  if (code != 200 || parseError || String(result["status"] | "") != "SUCCESS") {
     Serial.printf("[FIX04] OTP rejected / network failure: HTTP %d\n", code);
     showMessageAndPause("XAC THUC THAT BAI", "OTP / MANG / SERVER", "KHONG MO KHOA", "VUI LONG KIEM TRA", 3000);
     return;
@@ -270,7 +270,7 @@ void verifyOtpWithServer(String otpCode) {
 /**
  * Gửi HTTP POST thông báo sự kiện cập nhật trạng thái ngăn tủ (ITEM_STORED / ITEM_PICKED)
  */
-enum Fix04PostResult { FIX04_RETRY, FIX04_ACK, FIX04_STOP };
+// Fix04PostResult is declared in Fix04DoorCycle.h for Arduino prototype generation.
 Fix04PostResult updateLockerStatusToServer(int compId, String eventName, String doorState, String itemState) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[FIX04] WiFi offline; retaining pending transition.");
@@ -296,7 +296,7 @@ Fix04PostResult updateLockerStatusToServer(int compId, String eventName, String 
   DeserializationError parseError = deserializeJson(result, response);
   String expected = eventName == "ITEM_STORED" ? "STORED" : "AVAILABLE";
   if (code == 200 && !parseError && (result["success"] | false) &&
-      (result["locker_status"] | "") == expected) {
+      String(result["locker_status"] | "") == expected) {
     Serial.printf("[FIX04] Backend ACK confirms %s for locker %d.\n", eventName.c_str(), compId);
     return FIX04_ACK;
   }

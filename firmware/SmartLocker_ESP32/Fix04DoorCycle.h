@@ -5,6 +5,9 @@
 // Only the ESP32 sketch knows which GPIO maps to door/item observations.
 #include <stdint.h>
 
+// Declared in the header so Arduino-generated function prototypes can use it.
+enum Fix04PostResult { FIX04_RETRY, FIX04_ACK, FIX04_STOP };
+
 namespace smartlocker {
 class DoorCycle {
  public:
