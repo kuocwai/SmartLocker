@@ -1,5 +1,5 @@
 const express = require('express');
-const cors = require('cors');
+const crypto = require('node:crypto');
 const path = require('path');
 const os = require('os');
 const db = require('./db');
@@ -7,8 +7,49 @@ const db = require('./db');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
+// FIX 01: Fail closed if server credentials are not configured.
+const ADMIN_KEY = process.env.SMARTLOCKER_ADMIN_KEY || '';
+const DEVICE_KEY = process.env.SMARTLOCKER_DEVICE_KEY || '';
+if (ADMIN_KEY.length < 16 || DEVICE_KEY.length < 16 || ADMIN_KEY === DEVICE_KEY) {
+  console.error('[SECURITY] Cần 2 khóa ADMIN / DEVICE khác nhau, tối thiểu 16 ký tự mỗi khóa. Xem FIX_01_README.md.');
+  process.exit(1);
+}
+function matchesKey(given, expected) {
+  if (typeof given !== 'string') return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function isAdmin(req) { return matchesKey(req.get('X-Admin-Key'), ADMIN_KEY); }
+function isDevice(req) { return matchesKey(req.get('X-Device-Key'), DEVICE_KEY); }
+function requireAdmin(req, res, next) {
+  if (!isAdmin(req)) return res.status(401).json({ success: false, message: 'Cần khóa quản trị.' });
+  next();
+}
+function requireDeviceOrAdmin(req, res, next) {
+  if (!isDevice(req) && !isAdmin(req)) return res.status(401).json({ success: false, message: 'Cần xác thực thiết bị hoặc quản trị.' });
+  next();
+}
+// Giới hạn OTP theo IP; counters sống trong RAM, reset khi server khởi động lại.
+const otpFailures = new Map();
+const OTP_MAX_FAILURES = 10;
+const OTP_WINDOW_MS = 15 * 60 * 1000;
+function isOtpBlocked(req) {
+  const e = otpFailures.get(req.ip);
+  if (!e) return false;
+  if (Date.now() >= e.until) { otpFailures.delete(req.ip); return false; }
+  return e.count >= OTP_MAX_FAILURES;
+}
+function recordOtpFailure(req) {
+  const now = Date.now();
+  const prior = otpFailures.get(req.ip);
+  const e = !prior || now >= prior.until ? { count: 0, until: now + OTP_WINDOW_MS } : prior;
+  e.count++;
+  otpFailures.set(req.ip, e);
+}
+
+// Middleware: same-origin browser API; don't allow unrestricted CORS.
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -169,10 +210,17 @@ setInterval(() => {
 // RESTFUL APIS
 // ==========================================
 
+// Verify admin key without exposing the key itself.
+app.get('/api/admin/check', requireAdmin, (req, res) => res.json({ success: true }));
+
 // 1. Lấy trạng thái 2 ngăn tủ & đơn hàng hiện tại
 app.get('/api/lockers', (req, res) => {
   const lockers = db.getLockers().map(enrichLockerWithSLA);
-  res.json({ success: true, lockers });
+  // Never send order details / OTPs to anonymous clients (including ESP32 display sync).
+  res.json({
+    success: true,
+    lockers: isAdmin(req) ? lockers : lockers.map(l => ({ ...l, active_order: null, active_order_id: null }))
+  });
 });
 
 // 2. Sinh viên đặt ngăn tủ
@@ -222,9 +270,8 @@ app.post('/api/lockers/book', (req, res) => {
   });
 
   console.log(`[BOOKING] Đặt thành công Ngăn ${compartment_id} - Đơn #${order.id} - SĐT: ${order.customer_phone}`);
-  console.log(`  -> Mã Shipper: ${otp_shipper} | Mã Sinh viên: ${otp_student}`);
-
-  broadcastUpdate('LOCKER_BOOKED', { compartment_id, order });
+  // The OTP is only returned in the booking HTTP response; never log or broadcast it.
+  broadcastUpdate('LOCKER_BOOKED', { compartment_id });
 
   res.status(201).json({
     success: true,
@@ -238,7 +285,8 @@ app.post('/api/lockers/book', (req, res) => {
 });
 
 // 3. ESP32 Gửi mã OTP xác thực (Shipper giao hoặc Sinh viên nhận)
-app.post('/api/locker/verify-otp', (req, res) => {
+app.post('/api/locker/verify-otp', requireDeviceOrAdmin, (req, res) => {
+  if (isOtpBlocked(req)) return res.status(429).json({ status: 'RATE_LIMITED', message: 'Thử lại sau 15 phút.' });
   const { otp } = req.body;
 
   if (!otp) {
@@ -246,12 +294,13 @@ app.post('/api/locker/verify-otp', (req, res) => {
   }
 
   const cleanOtp = String(otp).trim();
-  console.log(`[VERIFY-OTP] Nhận yêu cầu kiểm tra mã: "${cleanOtp}"`);
+  // Never log an entered OTP.
 
   const result = db.findOrderByOtp(cleanOtp);
 
   if (!result) {
-    console.log(`[VERIFY-OTP] Thất bại: Mã "${cleanOtp}" không đúng hoặc đã hết hạn.`);
+    recordOtpFailure(req);
+    console.warn('[VERIFY-OTP] Mã không hợp lệ hoặc hết hạn.');
     return res.json({
       status: 'INVALID',
       message: 'MA OTP KHONG HOP LE HOAC DA HET HAN!'
@@ -259,6 +308,7 @@ app.post('/api/locker/verify-otp', (req, res) => {
   }
 
   const { order, role } = result;
+  otpFailures.delete(req.ip);
 
   console.log(`[VERIFY-OTP] Thành công! Vai trò: ${role} | Ngăn: ${order.compartment_id} | Đơn #${order.id}`);
 
@@ -286,7 +336,7 @@ app.post('/api/locker/verify-otp', (req, res) => {
 });
 
 // 4. ESP32 Cập nhật trạng thái sự kiện khi cửa đóng
-app.post('/api/locker/update-status', (req, res) => {
+app.post('/api/locker/update-status', requireDeviceOrAdmin, (req, res) => {
   const { compartment_id, event, door_state, item_state } = req.body;
 
   if (!compartment_id || ![1, 2].includes(Number(compartment_id))) {
@@ -362,7 +412,7 @@ app.post('/api/locker/update-status', (req, res) => {
 });
 
 // 5. Đồng bộ cảm biến trực tiếp từ ESP32
-app.post('/api/locker/sensor-sync', (req, res) => {
+app.post('/api/locker/sensor-sync', requireDeviceOrAdmin, (req, res) => {
   const { compartment_id, door_state, item_state } = req.body;
   if (!compartment_id) {
     return res.status(400).json({ success: false, message: 'Thiếu compartment_id' });
@@ -377,21 +427,21 @@ app.post('/api/locker/sensor-sync', (req, res) => {
 });
 
 // 6. Lấy lịch sử đơn hàng
-app.get('/api/orders/history', (req, res) => {
+app.get('/api/orders/history', requireAdmin, (req, res) => {
   const history = db.getOrderHistory(20);
   res.json({ success: true, history });
 });
 
 // 7. Reset toàn bộ 2 ngăn tủ về AVAILABLE (Dành cho demo / thuyết trình)
-app.post('/api/lockers/reset', (req, res) => {
+app.post('/api/lockers/reset', requireAdmin, (req, res) => {
   const resetLockers = db.resetAllLockers().map(enrichLockerWithSLA);
   console.log('[RESET] Đã đặt lại toàn bộ ngăn tủ về AVAILABLE.');
-  broadcastUpdate('LOCKERS_RESET', { lockers: resetLockers });
+  broadcastUpdate('LOCKERS_RESET');
   res.json({ success: true, message: 'Đã đặt lại 2 ngăn tủ về trạng thái trống!', lockers: resetLockers });
 });
 
 // 8. Tua nhanh thời gian SLA (Dành cho Giảng viên / Thuyết trình kiểm thử)
-app.post('/api/simulate/fast-forward', (req, res) => {
+app.post('/api/simulate/fast-forward', requireAdmin, (req, res) => {
   const { compartment_id, minutes } = req.body;
   const compId = Number(compartment_id || 1);
   const addMinutes = Number(minutes || 45);

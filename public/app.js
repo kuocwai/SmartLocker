@@ -7,6 +7,32 @@ let currentBookingCompId = 1;
 let currentShipperMessage = '';
 let activeTab = 'booking';
 let sseSource = null;
+let adminKey = ''; // Only in memory; do not use localStorage or query strings.
+const isAdminPage = /(?:^|\/)admin(?:\.html)?$/.test(window.location.pathname);
+
+function adminFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (adminKey) headers['X-Admin-Key'] = adminKey;
+  return fetch(url, { ...options, headers });
+}
+
+async function requestAdminAccess() {
+  if (!isAdminPage) return false;
+  if (adminKey) return true;
+  const candidate = window.prompt('Nhập khóa quản trị SmartLocker:');
+  if (!candidate) return false;
+  try {
+    const res = await fetch('/api/admin/check', { headers: { 'X-Admin-Key': candidate } });
+    if (!res.ok) throw new Error('Admin key rejected');
+    adminKey = candidate;
+    await fetchLockerData();
+    await fetchHistory();
+    return true;
+  } catch (_) {
+    showToast('Khóa quản trị không đúng!', 'error');
+    return false;
+  }
+}
 
 // Khởi chạy khi tài liệu sẵn sàng
 document.addEventListener('DOMContentLoaded', () => {
@@ -84,7 +110,7 @@ async function fetchSystemInfo() {
 
 async function fetchLockerData(showToastAlert = false) {
   try {
-    const res = await fetch('/api/lockers');
+    const res = await adminFetch('/api/lockers');
     const data = await res.json();
     if (data.success) {
       lockersState = data.lockers;
@@ -99,8 +125,9 @@ async function fetchLockerData(showToastAlert = false) {
 }
 
 async function fetchHistory() {
+  if (!adminKey || !isAdminPage) return;
   try {
-    const res = await fetch('/api/orders/history');
+    const res = await adminFetch('/api/orders/history');
     const data = await res.json();
     if (data.success) {
       renderHistoryTable(data.history);
@@ -127,6 +154,7 @@ function renderBookingTab(lockers) {
     const btnBook = document.getElementById(`btn-book-${id}`);
 
     if (!card) return;
+    if (orderBox) { orderBox.classList.add('hidden'); orderBox.innerHTML = ''; }
 
     // Reset state classes
     card.classList.remove('state-available', 'state-waiting', 'state-stored', 'state-abandoned');
@@ -566,7 +594,7 @@ async function simVerifyShipper(compId) {
 
   try {
     // 1. ESP32 Gửi verify OTP
-    const resVerify = await fetch('/api/locker/verify-otp', {
+    const resVerify = await adminFetch('/api/locker/verify-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ otp })
@@ -578,7 +606,7 @@ async function simVerifyShipper(compId) {
       
       // 2. Giả lập sau khi mở cửa, bỏ đồ vào và đóng cửa lại (Cảm biến E18 LOW + MC-38 LOW)
       setTimeout(async () => {
-        await fetch('/api/locker/update-status', {
+        await adminFetch('/api/locker/update-status', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -617,7 +645,7 @@ async function simVerifyStudent(compId) {
 
   try {
     // 1. ESP32 Gửi verify OTP
-    const resVerify = await fetch('/api/locker/verify-otp', {
+    const resVerify = await adminFetch('/api/locker/verify-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ otp })
@@ -629,7 +657,7 @@ async function simVerifyStudent(compId) {
 
       // 2. Giả lập sinh viên lấy đồ ra và đóng cửa lại (E18 HIGH + MC-38 LOW)
       setTimeout(async () => {
-        await fetch('/api/locker/update-status', {
+        await adminFetch('/api/locker/update-status', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -654,7 +682,7 @@ async function simVerifyStudent(compId) {
 
 async function simFastForward(compId, minutes) {
   try {
-    const res = await fetch('/api/simulate/fast-forward', {
+    const res = await adminFetch('/api/simulate/fast-forward', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ compartment_id: compId, minutes })
@@ -674,7 +702,7 @@ async function simFastForward(compId, minutes) {
 async function simResetAllLockers() {
   if (!confirm('Bạn có chắc chắn muốn đặt lại cả 2 ngăn tủ về trạng thái trống (AVAILABLE)?')) return;
   try {
-    const res = await fetch('/api/lockers/reset', { method: 'POST' });
+    const res = await adminFetch('/api/lockers/reset', { method: 'POST' });
     const data = await res.json();
     if (data.success) {
       showToast('Đã đặt lại toàn bộ ngăn tủ thành công!', 'success');
@@ -690,7 +718,8 @@ async function simResetAllLockers() {
 // TABS SWITCHER & UTILITIES
 // ==========================================
 
-function switchTab(tabName) {
+async function switchTab(tabName) {
+  if (tabName !== 'booking' && !(await requestAdminAccess())) return;
   activeTab = tabName;
   ['booking', 'dashboard', 'simulator'].forEach(t => {
     const section = document.getElementById(`tab-${t}`);

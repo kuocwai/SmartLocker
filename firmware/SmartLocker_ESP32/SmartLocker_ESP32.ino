@@ -30,13 +30,12 @@
 // ======================================================================================
 // 1. CẤU HÌNH MẠNG WI-FI VÀ ĐỊA CHỈ BACKEND SERVER
 // ======================================================================================
-// THAY ĐỔI TÊN WIFI VÀ MẬT KHẨU TẠI ĐÂY:
-const char* WIFI_SSID     = "kuocwai";         // Ví dụ: "FPT-University" hoặc Hotspot điện thoại
-const char* WIFI_PASSWORD = "123789456t";     // Mật khẩu WiFi
-
-// THAY ĐỔI ĐỊA CHỈ IP MÁY TÍNH CHẠY NODE.JS SERVER (Xem lệnh `ipconfig` trên Windows):
-// LƯU Ý: Máy tính và ESP32 phải kết nối CHUNG MỘT MẠNG WiFi / Điểm phát sóng Hotspot.
-String SERVER_BASE_URL    = "http://172.20.10.2:3000"; // Đổi thành IP LAN của bạn
+// Sao chép secrets.example.h -> secrets.h (gitignore); KHÔNG commit khóa hoặc Wi-Fi.
+#include "secrets.h"
+const char* WIFI_SSID = SMARTLOCKER_WIFI_SSID;
+const char* WIFI_PASSWORD = SMARTLOCKER_WIFI_PASSWORD;
+const char* DEVICE_API_KEY = SMARTLOCKER_DEVICE_API_KEY;
+String SERVER_BASE_URL = SMARTLOCKER_SERVER_URL;
 
 // Các đường dẫn API endpoints
 const String API_VERIFY_OTP    = "/api/locker/verify-otp";
@@ -206,17 +205,18 @@ void verifyOtpWithServer(String otpCode) {
   }
 
   Serial.println("\n[API] Gui POST /api/locker/verify-otp ...");
-  Serial.println("[API] Ma OTP kiem tra: " + otpCode);
+  // Don't print OTP over serial.
 
   lcdPrintLine(0, "   XAC THUC MA...   ", true);
   lcdPrintLine(1, "DANG KET NOI SERVER ", true);
-  lcdPrintLine(2, "OTP: " + otpCode, true);
+  lcdPrintLine(2, "DANG KIEM TRA...", true);
   lcdPrintLine(3, "XIN VUI LONG CHO... ", true);
 
   HTTPClient http;
   String url = SERVER_BASE_URL + API_VERIFY_OTP;
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Device-Key", DEVICE_API_KEY);
 
   // Đóng gói JSON payload
   StaticJsonDocument<256> docRequest;
@@ -228,7 +228,7 @@ void verifyOtpWithServer(String otpCode) {
 
   if (httpResponseCode > 0) {
     String responseString = http.getString();
-    Serial.printf("[API] Server tra ve HTTP %d: %s\n", httpResponseCode, responseString.c_str());
+    Serial.printf("[API] Server tra ve HTTP %d\n", httpResponseCode);
 
     StaticJsonDocument<512> docResponse;
     DeserializationError error = deserializeJson(docResponse, responseString);
@@ -298,6 +298,7 @@ void updateLockerStatusToServer(int compId, String eventName, String doorState, 
   String url = SERVER_BASE_URL + API_UPDATE_STATUS;
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Device-Key", DEVICE_API_KEY);
 
   StaticJsonDocument<256> doc;
   doc["compartment_id"] = compId;
@@ -368,7 +369,7 @@ void handleSerialOtpInput() {
     if (c == '\n') {
       // Phím Enter: Nếu đã nhập đủ mã thì xác thực
       if (enteredOtp.length() >= 4) {
-        Serial.println("\n[SERIAL] Nhan lenh ENTER -> Bat dau xac thuc ma: " + enteredOtp);
+        Serial.println("\n[SERIAL] Xac thuc OTP dang nhap.");
         verifyOtpWithServer(enteredOtp);
       } else {
         Serial.println("\n[SERIAL] Ma OTP chua du do dai! (Can 6 so)");
@@ -391,7 +392,7 @@ void handleSerialOtpInput() {
     if (isDigit(c)) {
       if (enteredOtp.length() < OTP_LENGTH) {
         enteredOtp += c;
-        Serial.printf("[OTP] Nhap so: %c -> Chuoi hien tai: %s\n", c, enteredOtp.c_str());
+        // Do not output entered OTP digits to Serial Monitor.
         displayIdleScreen();
 
         // Tự động kiểm tra ngay khi đủ 6 chữ số
