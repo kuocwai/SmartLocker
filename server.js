@@ -628,6 +628,23 @@ app.get('/api/events', (req, res) => {
 });
 
 // Chạy server
+// FIX 03: Centralized JSON error responses (never leak stack traces to clients).
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ success: false, message: 'Dữ liệu JSON không hợp lệ.' });
+  }
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ success: false, message: 'Dữ liệu gửi lên quá lớn.' });
+  }
+  const code = Number.isInteger(err.status) && err.status >= 400 && err.status < 500
+    ? err.status : 500;
+  if (code === 500) console.error('[SERVER ERROR]', err);
+  return res.status(code).json({
+    success: false,
+    message: code === 500 ? 'Lỗi máy chủ nội bộ.' : 'Yêu cầu không hợp lệ.'
+  });
+});
 app.listen(PORT, '0.0.0.0', () => {
   const ifaces = getNetworkInterfacesList();
   console.log('\n======================================================');
