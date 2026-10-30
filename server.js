@@ -34,6 +34,39 @@ function requireDeviceOrAdmin(req, res, next) {
 const otpFailures = new Map();
 const OTP_MAX_FAILURES = 10;
 const OTP_WINDOW_MS = 15 * 60 * 1000;
+
+// FIX 02: OTP verification authorizes exactly one matching delivery/pickup transition.
+// An authorization expires to avoid accepting a stale ESP32 event after a long delay.
+// Stored in memory: after a server restart, the user must verify the OTP again.
+const pendingTransitions = new Map();
+const TRANSITION_TTL_MS = 10 * 60 * 1000;
+function authorizeTransition(order, role) {
+  pendingTransitions.set(order.compartment_id, {
+    orderId: order.id,
+    role,
+    expiresAt: Date.now() + TRANSITION_TTL_MS
+  });
+}
+function hasAuthorizedTransition(compId, order, role) {
+  const pending = pendingTransitions.get(compId);
+  if (!pending) return false;
+  if (Date.now() > pending.expiresAt) {
+    pendingTransitions.delete(compId);
+    return false;
+  }
+  return pending.orderId === order.id && pending.role === role;
+}
+function validCompartmentId(value) {
+  return value === 1 || value === 2 || value === '1' || value === '2';
+}
+function validSensorValue(value, values) {
+  return typeof value === 'string' && values.includes(value);
+}
+function isSensorPayloadValid(doorState, itemState) {
+  return (doorState === undefined || validSensorValue(doorState, ['OPEN', 'CLOSED'])) &&
+    (itemState === undefined || validSensorValue(itemState, ['DETECTED', 'EMPTY']));
+}
+
 function isOtpBlocked(req) {
   const e = otpFailures.get(req.ip);
   if (!e) return false;
@@ -309,6 +342,7 @@ app.post('/api/locker/verify-otp', requireDeviceOrAdmin, (req, res) => {
 
   const { order, role } = result;
   otpFailures.delete(req.ip);
+  authorizeTransition(order, role);
 
   console.log(`[VERIFY-OTP] Thành công! Vai trò: ${role} | Ngăn: ${order.compartment_id} | Đơn #${order.id}`);
 
@@ -338,92 +372,83 @@ app.post('/api/locker/verify-otp', requireDeviceOrAdmin, (req, res) => {
 // 4. ESP32 Cập nhật trạng thái sự kiện khi cửa đóng
 app.post('/api/locker/update-status', requireDeviceOrAdmin, (req, res) => {
   const { compartment_id, event, door_state, item_state } = req.body;
-
-  if (!compartment_id || ![1, 2].includes(Number(compartment_id))) {
+  if (!validCompartmentId(compartment_id)) {
     return res.status(400).json({ success: false, message: 'Số ngăn tủ không hợp lệ!' });
+  }
+  if (typeof event !== 'string' || !['ITEM_STORED', 'ITEM_PICKED', 'SENSOR_SYNC'].includes(event)) {
+    return res.status(400).json({ success: false, message: 'Sự kiện không được hỗ trợ.' });
+  }
+  if (!isSensorPayloadValid(door_state, item_state)) {
+    return res.status(400).json({ success: false, message: 'Giá trị cảm biến không hợp lệ.' });
   }
 
   const compId = Number(compartment_id);
-  const now = Date.now();
-  console.log(`[UPDATE-STATUS] Nhận sự kiện từ ESP32: Ngăn ${compId} - Event: ${event}`);
+  const locker = db.getLocker(compId);
+  if (!locker) return res.status(404).json({ success: false, message: 'Không tìm thấy ngăn tủ.' });
 
-  if (event === 'ITEM_STORED') {
-    // Shipper đã bỏ đồ vào và đóng cửa
-    const activeOrder = db.getActiveOrder(compId);
-    if (activeOrder) {
-      db.updateOrder(activeOrder.id, {
-        status: 'STORED',
-        stored_at: now
-      });
-    }
-
-    db.updateLocker(compId, {
-      status: 'STORED',
-      door_state: door_state || 'CLOSED',
-      item_state: item_state || 'DETECTED'
-    });
-
-    console.log(`[UPDATE-STATUS] Ngăn ${compId} đã chuyển sang STORED. Kích hoạt đồng hồ SLA.`);
-    broadcastUpdate('ITEM_STORED', { compartment_id: compId });
-
-    return res.json({
-      success: true,
-      locker_status: 'STORED',
-      message: `Ngăn ${compId} đã có hàng. Bắt đầu đếm giờ lưu trữ an toàn thực phẩm.`
-    });
-
-  } else if (event === 'ITEM_PICKED') {
-    // Sinh viên đã lấy đồ ra và đóng cửa
-    const activeOrder = db.getActiveOrder(compId);
-    if (activeOrder) {
-      db.updateOrder(activeOrder.id, {
-        status: 'COMPLETED',
-        completed_at: now
-      });
-    }
-
-    db.updateLocker(compId, {
-      status: 'AVAILABLE',
-      door_state: door_state || 'CLOSED',
-      item_state: item_state || 'EMPTY',
-      active_order_id: null
-    });
-
-    console.log(`[UPDATE-STATUS] Ngăn ${compId} hoàn tất đơn hàng. Đã giải phóng về AVAILABLE.`);
-    broadcastUpdate('ITEM_PICKED', { compartment_id: compId });
-
-    return res.json({
-      success: true,
-      locker_status: 'AVAILABLE',
-      message: `Đơn hàng hoàn tất. Ngăn ${compId} đã sẵn sàng nhận đơn mới.`
-    });
-
-  } else {
-    // Cập nhật trạng thái cảm biến thông thường
+  if (event === 'SENSOR_SYNC') {
     const fieldsToUpdate = {};
-    if (door_state) fieldsToUpdate.door_state = door_state;
-    if (item_state) fieldsToUpdate.item_state = item_state;
-
+    if (door_state !== undefined) fieldsToUpdate.door_state = door_state;
+    if (item_state !== undefined) fieldsToUpdate.item_state = item_state;
     db.updateLocker(compId, fieldsToUpdate);
     broadcastUpdate('SENSOR_SYNC', { compartment_id: compId, door_state, item_state });
-
     return res.json({ success: true, message: 'Đã đồng bộ trạng thái cảm biến.' });
   }
+
+  const isDeposit = event === 'ITEM_STORED';
+  const expectedOrderStatus = isDeposit ? 'WAITING_DELIVERY' : 'STORED';
+  const expectedRole = isDeposit ? 'SHIPPER' : 'STUDENT';
+  const expectedItemState = isDeposit ? 'DETECTED' : 'EMPTY';
+  const expectedLockerStatus = expectedOrderStatus;
+  const activeOrder = db.getActiveOrder(compId);
+
+  // Reject stale/duplicate/out-of-sequence events. Never change locker status
+  // unless its active order and its status agree with the intended transition.
+  if (!activeOrder || !locker.active_order_id || locker.active_order_id !== activeOrder.id ||
+      activeOrder.status !== expectedOrderStatus || locker.status !== expectedLockerStatus) {
+    return res.status(409).json({ success: false, message: 'Không có đơn hàng hợp lệ ở trạng thái yêu cầu.' });
+  }
+  if (!hasAuthorizedTransition(compId, activeOrder, expectedRole)) {
+    return res.status(403).json({ success: false, message: 'Chưa xác thực OTP tương ứng hoặc phiên xác thực đã hết hạn.' });
+  }
+  // Firmware currently reports these sensor observations when it closes the door.
+  // This is API-level validation, NOT physical proof that the door actually opened.
+  if (door_state !== 'CLOSED' || item_state !== expectedItemState) {
+    return res.status(400).json({ success: false, message: 'Chưa xác nhận cửa đóng và trạng thái hàng phù hợp.' });
+  }
+
+  const now = Date.now();
+  if (isDeposit) {
+    db.updateOrder(activeOrder.id, { status: 'STORED', stored_at: now });
+    db.updateLocker(compId, { status: 'STORED', door_state: 'CLOSED', item_state: 'DETECTED' });
+    pendingTransitions.delete(compId);
+    broadcastUpdate('ITEM_STORED', { compartment_id: compId });
+    return res.json({ success: true, locker_status: 'STORED', message: `Ngăn ${compId} đã có hàng. Bắt đầu đếm giờ lưu trữ.` });
+  }
+
+  db.updateOrder(activeOrder.id, { status: 'COMPLETED', completed_at: now });
+  db.updateLocker(compId, { status: 'AVAILABLE', door_state: 'CLOSED', item_state: 'EMPTY', active_order_id: null });
+  pendingTransitions.delete(compId);
+  broadcastUpdate('ITEM_PICKED', { compartment_id: compId });
+  return res.json({ success: true, locker_status: 'AVAILABLE', message: `Đơn hàng hoàn tất. Ngăn ${compId} đã sẵn sàng.` });
 });
 
 // 5. Đồng bộ cảm biến trực tiếp từ ESP32
 app.post('/api/locker/sensor-sync', requireDeviceOrAdmin, (req, res) => {
   const { compartment_id, door_state, item_state } = req.body;
-  if (!compartment_id) {
-    return res.status(400).json({ success: false, message: 'Thiếu compartment_id' });
+  if (!validCompartmentId(compartment_id)) {
+    return res.status(400).json({ success: false, message: 'Số ngăn tủ không hợp lệ!' });
+  }
+  if (!isSensorPayloadValid(door_state, item_state)) {
+    return res.status(400).json({ success: false, message: 'Giá trị cảm biến không hợp lệ.' });
   }
   const compId = Number(compartment_id);
-  db.updateLocker(compId, {
-    door_state: door_state || 'CLOSED',
-    item_state: item_state || 'EMPTY'
-  });
+  const fields = {};
+  if (door_state !== undefined) fields.door_state = door_state;
+  if (item_state !== undefined) fields.item_state = item_state;
+  db.updateLocker(compId, fields);
   broadcastUpdate('SENSOR_SYNC', { compartment_id: compId, door_state, item_state });
-  res.json({ success: true });
+  return res.json({ success: true });
 });
 
 // 6. Lấy lịch sử đơn hàng
