@@ -26,6 +26,7 @@
 #include <ArduinoJson.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include "Fix04DoorCycle.h"
 
 // ======================================================================================
 // 1. CẤU HÌNH MẠNG WI-FI VÀ ĐỊA CHỈ BACKEND SERVER
@@ -69,7 +70,9 @@ enum SystemState {
   STATE_IDLE,                 // Đang rảnh, chờ người dùng nhập mã OTP
   STATE_WAITING_DEPOSIT,      // Đã mở cửa cho Shipper, chờ bỏ hàng & đóng cửa
   STATE_WAITING_PICKUP,       // Đã mở cửa cho Sinh viên, chờ lấy đồ & đóng cửa
-  STATE_MESSAGE_PAUSE         // Hiển thị thông báo tạm thời rồi quay về IDLE
+  STATE_MESSAGE_PAUSE,        // Hiển thị thông báo tạm thời rồi quay về IDLE
+  STATE_PENDING_UPDATE,       // Đã đóng cửa, chờ ACK xác thực từ Backend
+  STATE_NEEDS_ATTENTION       // Backend từ chối: cần kiểm tra thủ công
 };
 
 SystemState currentState = STATE_IDLE;
@@ -86,6 +89,11 @@ int lastE18State = HIGH;
 int lastMC38State = LOW;
 unsigned long sensorDebounceTimer = 0;
 const unsigned long DEBOUNCE_DELAY = 400; // 400ms ổn định tín hiệu cảm biến
+smartlocker::DoorCycle fix04DoorCycle;
+String fix04PendingEvent = "";
+unsigned long fix04LastPostAttempt = 0;
+const unsigned long FIX04_RETRY_MS = 3000; // Thử lại khi mất mạng / response không chắc chắn
+
 
 // Biến quản lý định kỳ kiểm tra kết nối WiFi & Server
 unsigned long lastWiFiCheckTimer = 0;
@@ -198,157 +206,144 @@ void triggerSolenoidUnlock(int compartmentId) {
  * Gửi mã OTP lên Server để xác thực danh tính (Shipper hoặc Sinh viên)
  */
 void verifyOtpWithServer(String otpCode) {
+  enteredOtp = "";
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[ERR] Wi-Fi bi mat ket noi! Khong the gui OTP.");
-    showMessageAndPause("LOI KET NOI WIFI!", "KHONG THE KIEM TRA", "VUI LONG KIEM TRA", "LAI BO PHAT WIFI", 3000);
+    Serial.println("[FIX04] WiFi offline: OTP not verified, solenoid stays locked.");
+    showMessageAndPause("MAT KET NOI WIFI", "CHUA XAC THUC OTP", "VUI LONG THU LAI", "KHI CO WIFI", 3000);
     return;
   }
-
-  Serial.println("\n[API] Gui POST /api/locker/verify-otp ...");
-  // Don't print OTP over serial.
-
   lcdPrintLine(0, "   XAC THUC MA...   ", true);
   lcdPrintLine(1, "DANG KET NOI SERVER ", true);
   lcdPrintLine(2, "DANG KIEM TRA...", true);
   lcdPrintLine(3, "XIN VUI LONG CHO... ", true);
 
   HTTPClient http;
-  String url = SERVER_BASE_URL + API_VERIFY_OTP;
-  http.begin(url);
+  if (!http.begin(SERVER_BASE_URL + API_VERIFY_OTP)) {
+    showMessageAndPause("LOI KET NOI API", "CHUA XAC THUC OTP", "KHONG MO KHOA", "VUI LONG THU LAI", 3000);
+    return;
+  }
+  http.setTimeout(4500);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Device-Key", DEVICE_API_KEY);
+  StaticJsonDocument<256> request;
+  request["otp"] = otpCode;
+  String body;
+  serializeJson(request, body);
+  int code = http.POST(body);
+  String response = code > 0 ? http.getString() : "";
+  http.end();
 
-  // Đóng gói JSON payload
-  StaticJsonDocument<256> docRequest;
-  docRequest["otp"] = otpCode;
-  String requestBody;
-  serializeJson(docRequest, requestBody);
-
-  int httpResponseCode = http.POST(requestBody);
-
-  if (httpResponseCode > 0) {
-    String responseString = http.getString();
-    Serial.printf("[API] Server tra ve HTTP %d\n", httpResponseCode);
-
-    StaticJsonDocument<512> docResponse;
-    DeserializationError error = deserializeJson(docResponse, responseString);
-
-    if (!error) {
-      String status = docResponse["status"] | "INVALID";
-
-      if (status == "SUCCESS") {
-        String role = docResponse["role"] | "";
-        int compId  = docResponse["compartment_id"] | 1;
-        currentActiveCompartment = compId;
-
-        if (role == "SHIPPER") {
-          Serial.printf("[AUTH] XAC THUC THANH CONG: SHIPPER -> MO NGAN %d\n", compId);
-          triggerSolenoidUnlock(compId);
-
-          // Hiển thị hướng dẫn cho Shipper
-          lcdPrintLine(0, " XIN CHAO SHIPPER!  ", true);
-          lcdPrintLine(1, "HAY BO HANG VAO NGAN", true);
-          lcdPrintLine(2, "SO " + String(compId) + " VA DONG CUA", true);
-          lcdPrintLine(3, "====================", true);
-
-          currentState = STATE_WAITING_DEPOSIT;
-          stateTimer = millis(); // Bắt đầu giám sát cảm biến
-        } 
-        else if (role == "STUDENT") {
-          Serial.printf("[AUTH] XAC THUC THANH CONG: SINH VIEN -> MO NGAN %d\n", compId);
-          triggerSolenoidUnlock(compId);
-
-          // Hiển thị hướng dẫn cho Sinh viên
-          lcdPrintLine(0, "   XIN CHAO BAN!    ", true);
-          lcdPrintLine(1, "HAY LAY MON AN TAI  ", true);
-          lcdPrintLine(2, "NGAN " + String(compId) + " & DONG CUA", true);
-          lcdPrintLine(3, "====================", true);
-
-          currentState = STATE_WAITING_PICKUP;
-          stateTimer = millis();
-        }
-      } else {
-        // Sai mã hoặc quá hạn SLA 120 phút
-        Serial.println("[AUTH] THAT BAI: Ma OTP sai hoac don hang da bi huy/qua han SLA!");
-        showMessageAndPause("    THONG BAO!      ", "  MA OTP KHONG DUNG ", " HOAC DA HET HAN SLA", " VUI LONG THU LAI!  ", 3000);
-      }
-    } else {
-      Serial.println("[ERR] Loi doc JSON phan hoi tu Server!");
-      showMessageAndPause("LOI DU LIEU SERVER", "JSON PHAN HOI KHONG", "HOP LE. KIEM TRA", "LOG TREN TERMINAL", 2500);
-    }
-  } else {
-    Serial.printf("[ERR] Loi ket noi den Server: %s (Ma loi: %d)\n", http.errorToString(httpResponseCode).c_str(), httpResponseCode);
-    showMessageAndPause("LOI GUI HTTP POST", "SERVER KHONG PHAN HOI", "KIEM TRA IP SERVER:", SERVER_BASE_URL.substring(7, 22), 3500);
+  StaticJsonDocument<512> result;
+  DeserializationError parseError = deserializeJson(result, response);
+  if (code != 200 || parseError || (result["status"] | "") != String("SUCCESS")) {
+    Serial.printf("[FIX04] OTP rejected / network failure: HTTP %d\n", code);
+    showMessageAndPause("XAC THUC THAT BAI", "OTP / MANG / SERVER", "KHONG MO KHOA", "VUI LONG KIEM TRA", 3000);
+    return;
+  }
+  const String role = result["role"] | "";
+  const int compId = result["compartment_id"] | 0;
+  if ((role != "SHIPPER" && role != "STUDENT") || (compId != 1 && compId != 2)) {
+    Serial.println("[FIX04] Invalid OTP response role/compartment: relay remains locked.");
+    showMessageAndPause("DU LIEU API LOI", "KHONG MO KHOA", "VUI LONG KIEM TRA", "BACKEND", 3000);
+    return;
   }
 
-  http.end();
-  enteredOtp = ""; // Xóa bộ đệm OTP sau khi đã kiểm tra
+  currentActiveCompartment = compId;
+  fix04DoorCycle.begin(millis());
+  triggerSolenoidUnlock(compId); // 800ms pulse unchanged.
+  if (role == "SHIPPER") {
+    lcdPrintLine(0, " XIN CHAO SHIPPER!  ", true);
+    lcdPrintLine(1, "HAY BO HANG VAO NGAN", true);
+    lcdPrintLine(2, "SO " + String(compId) + " VA DONG CUA", true);
+    lcdPrintLine(3, "====================", true);
+    currentState = STATE_WAITING_DEPOSIT;
+  } else {
+    lcdPrintLine(0, "   XIN CHAO BAN!    ", true);
+    lcdPrintLine(1, "HAY LAY MON AN TAI  ", true);
+    lcdPrintLine(2, "NGAN " + String(compId) + " & DONG CUA", true);
+    lcdPrintLine(3, "====================", true);
+    currentState = STATE_WAITING_PICKUP;
+  }
+  stateTimer = millis();
 }
 
 /**
  * Gửi HTTP POST thông báo sự kiện cập nhật trạng thái ngăn tủ (ITEM_STORED / ITEM_PICKED)
  */
-void updateLockerStatusToServer(int compId, String eventName, String doorState, String itemState) {
+enum Fix04PostResult { FIX04_RETRY, FIX04_ACK, FIX04_STOP };
+Fix04PostResult updateLockerStatusToServer(int compId, String eventName, String doorState, String itemState) {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[ERR] Mat WiFi, khong the cap nhat trang thai!");
-    return;
+    Serial.println("[FIX04] WiFi offline; retaining pending transition.");
+    return FIX04_RETRY;
   }
-
   HTTPClient http;
-  String url = SERVER_BASE_URL + API_UPDATE_STATUS;
-  http.begin(url);
+  if (!http.begin(SERVER_BASE_URL + API_UPDATE_STATUS)) return FIX04_RETRY;
+  http.setTimeout(4500);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Device-Key", DEVICE_API_KEY);
-
-  StaticJsonDocument<256> doc;
-  doc["compartment_id"] = compId;
-  doc["event"]          = eventName;
-  doc["door_state"]     = doorState;
-  doc["item_state"]     = itemState;
-
-  String requestBody;
-  serializeJson(doc, requestBody);
-
-  Serial.printf("[API] Gui cap nhat su kien: %s toi Server...\n", eventName.c_str());
-  int code = http.POST(requestBody);
-  if (code > 0) {
-    Serial.printf("[API] Cap nhat thanh cong! Server tra ve HTTP %d\n", code);
-  } else {
-    Serial.printf("[ERR] Cap nhat that bai: %s\n", http.errorToString(code).c_str());
-  }
+  StaticJsonDocument<256> request;
+  request["compartment_id"] = compId;
+  request["event"] = eventName;
+  request["door_state"] = doorState;
+  request["item_state"] = itemState;
+  String body;
+  serializeJson(request, body);
+  int code = http.POST(body);
+  String response = code > 0 ? http.getString() : "";
   http.end();
+
+  StaticJsonDocument<512> result;
+  DeserializationError parseError = deserializeJson(result, response);
+  String expected = eventName == "ITEM_STORED" ? "STORED" : "AVAILABLE";
+  if (code == 200 && !parseError && (result["success"] | false) &&
+      (result["locker_status"] | "") == expected) {
+    Serial.printf("[FIX04] Backend ACK confirms %s for locker %d.\n", eventName.c_str(), compId);
+    return FIX04_ACK;
+  }
+  // Backend may have committed but its ACK was lost. A later 409 is ambiguous:
+  // never assume success or send a different event to 'fix' the state.
+  if (code >= 400 && code < 500) {
+    Serial.printf("[FIX04] Backend rejected transition HTTP %d. Manual check required.\n", code);
+    return FIX04_STOP;
+  }
+  Serial.printf("[FIX04] No confirmed ACK (HTTP %d); retry will be scheduled.\n", code);
+  return FIX04_RETRY;
 }
 
 /**
  * Đồng bộ trạng thái ngăn tủ từ Server để hiển thị nhãn N1/N2 lên LCD
  */
 void syncLockersStateFromServer() {
-  if (WiFi.status() != WL_CONNECTED) return;
-
-  HTTPClient http;
-  String url = SERVER_BASE_URL + API_GET_LOCKERS;
-  http.begin(url);
-  int code = http.GET();
-
-  if (code == 200) {
-    String payload = http.getString();
-    StaticJsonDocument<1024> doc;
-    if (!deserializeJson(doc, payload)) {
-      JsonArray arr = doc["lockers"].as<JsonArray>();
-      for (JsonObject item : arr) {
-        int id = item["id"];
-        String st = item["status"] | "AVAILABLE";
-        String label = "[TRONG]";
-        if (st == "WAITING_DELIVERY") label = "[CHO GIAO]";
-        else if (st == "STORED") label = "[CO HANG]";
-        else if (st == "ABANDONED") label = "[QUA HAN]";
-
-        if (id == 1) locker1StateStr = label;
-        if (id == 2) locker2StateStr = label;
-      }
-    }
+  if (WiFi.status() != WL_CONNECTED) {
+    locker1StateStr = "[???]";
+    locker2StateStr = "[???]";
+    return;
   }
+  HTTPClient http;
+  if (!http.begin(SERVER_BASE_URL + API_GET_LOCKERS)) return;
+  http.setTimeout(4500);
+  int code = http.GET();
+  String response = code == 200 ? http.getString() : "";
   http.end();
+  StaticJsonDocument<1024> doc;
+  if (code != 200 || deserializeJson(doc, response)) {
+    locker1StateStr = "[???]";
+    locker2StateStr = "[???]";
+    return;
+  }
+  JsonArray lockers = doc["lockers"].as<JsonArray>();
+  if (lockers.isNull()) return;
+  for (JsonObject locker : lockers) {
+    const int id = locker["id"] | 0;
+    const String status = locker["status"] | "";
+    String label = "[???]";
+    if (status == "AVAILABLE") label = "[TRONG]";
+    else if (status == "WAITING_DELIVERY") label = "[CHO GIAO]";
+    else if (status == "STORED") label = "[CO HANG]";
+    else if (status == "ABANDONED") label = "[QUA HAN]";
+    if (id == 1) locker1StateStr = label;
+    if (id == 2) locker2StateStr = label;
+  }
 }
 
 // ======================================================================================
@@ -485,67 +480,59 @@ void checkI2CKeypadInput() {
  * Xử lý máy trạng thái sau khi đã mở khóa cửa
  */
 void handleSensorStateMachine() {
-  int e18Value  = digitalRead(PIN_SENSOR_E18);  // LOW = Có hàng, HIGH = Trống
-  int mc38Value = digitalRead(PIN_SENSOR_MC38); // LOW = Đóng cửa, HIGH = Cửa đang mở
+  const int e18Value = digitalRead(PIN_SENSOR_E18);    // LOW = item detected.
+  const int mc38Value = digitalRead(PIN_SENSOR_MC38);  // LOW = door closed.
+  const unsigned long now = millis();
 
-  // 1. GIAI ĐOẠN SHIPPER GIAO ĐỒ: Chờ Shipper bỏ hàng VÀ đóng cửa
-  if (currentState == STATE_WAITING_DEPOSIT) {
-    // Điều kiện hoàn thành giao đồ: Có đồ ăn (E18 = LOW) VÀ Cửa đã đóng kín (MC-38 = LOW)
-    if (e18Value == LOW && mc38Value == LOW) {
-      if ((millis() - sensorDebounceTimer) > DEBOUNCE_DELAY) {
-        Serial.printf("[FSM] XAC NHAN: SHIPPER DA BO DO VA DONG CUA NGAN %d!\n", currentActiveCompartment);
-
-        // Gửi thông báo ITEM_STORED lên Backend Server (Kích hoạt SLA đếm ngược)
-        updateLockerStatusToServer(currentActiveCompartment, "ITEM_STORED", "CLOSED", "DETECTED");
-
-        // Cập nhật LCD thông báo
-        showMessageAndPause(
-          " NGAN " + String(currentActiveCompartment) + ": DA CO MON ",
-          "DANG LUU TRU AN TOAN",
-          "  HE THONG TINH GIO ",
-          "CAM ON QUY SHIPPER! ",
-          3500
-        );
-
-        // Đồng bộ lại nhãn ngăn tủ
-        syncLockersStateFromServer();
-      }
-    } else {
-      sensorDebounceTimer = millis(); // Reset debounce nếu chưa ổn định
+  if (currentState == STATE_WAITING_DEPOSIT || currentState == STATE_WAITING_PICKUP) {
+    const bool isDeposit = currentState == STATE_WAITING_DEPOSIT;
+    const bool expectedItem = isDeposit ? e18Value == LOW : e18Value == HIGH;
+    if (fix04DoorCycle.observe(mc38Value == HIGH, expectedItem, now)) {
+      fix04PendingEvent = isDeposit ? "ITEM_STORED" : "ITEM_PICKED";
+      currentState = STATE_PENDING_UPDATE;
+      fix04LastPostAttempt = now - FIX04_RETRY_MS; // Trigger first post on next loop.
+      lcdPrintLine(0, "DA XAC NHAN DONG CUA", true);
+      lcdPrintLine(1, "DANG CHO BACKEND...", true);
+      lcdPrintLine(2, "CHUA HOAN TAT DON", true);
+      lcdPrintLine(3, "VUI LONG CHO", true);
+      Serial.println("[FIX04] Door cycle stable, awaiting Backend ACK.");
     }
-  }
-
-  // 2. GIAI ĐOẠN SINH VIÊN LẤY ĐỒ: Chờ Sinh viên lấy đồ ra VÀ đóng cửa
-  else if (currentState == STATE_WAITING_PICKUP) {
-    // Điều kiện hoàn thành lấy đồ: Đã lấy đồ ra (E18 = HIGH) VÀ Cửa đã đóng kín (MC-38 = LOW)
-    if (e18Value == HIGH && mc38Value == LOW) {
-      if ((millis() - sensorDebounceTimer) > DEBOUNCE_DELAY) {
-        Serial.printf("[FSM] XAC NHAN: SINH VIEN DA LAY DO VA DONG CUA NGAN %d!\n", currentActiveCompartment);
-
-        // Gửi thông báo ITEM_PICKED lên Backend Server (Giải phóng ngăn về AVAILABLE)
-        updateLockerStatusToServer(currentActiveCompartment, "ITEM_PICKED", "CLOSED", "EMPTY");
-
-        // Cập nhật LCD thông báo
-        showMessageAndPause(
-          " NGAN " + String(currentActiveCompartment) + ": DA LAY DO! ",
-          " CHUC BAN NGON MIENG ",
-          "   DON HANG HOAN TAT  ",
-          "CAM ON BAN DA DUNG! ",
-          3500
-        );
-
-        // Đồng bộ lại nhãn ngăn tủ
-        syncLockersStateFromServer();
-      }
-    } else {
-      sensorDebounceTimer = millis();
+  } else if (currentState == STATE_PENDING_UPDATE) {
+    const bool isDeposit = fix04PendingEvent == "ITEM_STORED";
+    // Never send a previously queued observation if the physical condition changed.
+    // If it changed while offline, fail closed; operator must reconcile Backend/door.
+    if (mc38Value != LOW || (isDeposit ? e18Value != LOW : e18Value != HIGH)) {
+      currentState = STATE_NEEDS_ATTENTION;
+      lcdPrintLine(0, "CAN KIEM TRA CAM BIEN", true);
+      lcdPrintLine(1, "TRANG THAI DA DOI", true);
+      lcdPrintLine(2, "KHONG NHAP OTP MOI", true);
+      lcdPrintLine(3, "BAO NGUOI QUAN TRI", true);
+      return;
     }
-  }
-
-  // 3. TRẠNG THÁI HIỂN THỊ TẠM THỜI: Hết thời gian pause -> quay về IDLE
-  else if (currentState == STATE_MESSAGE_PAUSE) {
-    if (millis() - stateTimer >= pauseDuration) {
+    if (static_cast<unsigned long>(now - fix04LastPostAttempt) < FIX04_RETRY_MS) return;
+    fix04LastPostAttempt = now;
+    const Fix04PostResult result = updateLockerStatusToServer(
+      currentActiveCompartment, fix04PendingEvent, "CLOSED", isDeposit ? "DETECTED" : "EMPTY");
+    if (result == FIX04_ACK) {
+      fix04PendingEvent = "";
+      showMessageAndPause(isDeposit ? "DA LUU TRU AN TOAN" : "DA LAY DO THANH CONG",
+        "BACKEND DA XAC NHAN", "TRANG THAI DONG BO", "CAM ON BAN!", 3500);
+      syncLockersStateFromServer();
+    } else if (result == FIX04_STOP) {
+      currentState = STATE_NEEDS_ATTENTION;
+      lcdPrintLine(0, "CAN KIEM TRA BACKEND", true);
+      lcdPrintLine(1, "API TU CHOI CAP NHAT", true);
+      lcdPrintLine(2, "KHONG NHAP OTP MOI", true);
+      lcdPrintLine(3, "BAO NGUOI QUAN TRI", true);
+    } else if (WiFi.status() != WL_CONNECTED) {
+      lcdPrintLine(1, "MAT WIFI - SE THU LAI", true);
+    } else {
+      lcdPrintLine(1, "CHUA CO ACK - THU LAI", true);
+    }
+  } else if (currentState == STATE_MESSAGE_PAUSE) {
+    if (now - stateTimer >= pauseDuration) {
       currentState = STATE_IDLE;
+      currentActiveCompartment = 0;
       enteredOtp = "";
       displayIdleScreen();
     }
@@ -557,8 +544,7 @@ void handleSensorStateMachine() {
 // ======================================================================================
 void checkWiFiConnection() {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[WIFI] Mat ket noi WiFi! Dang thu ket noi lai...");
-    WiFi.disconnect();
+    Serial.println("[WIFI] Mat ket noi; thu reconnect khong xoa su kien dang cho.");
     WiFi.reconnect();
   }
 }
