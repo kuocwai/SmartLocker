@@ -758,27 +758,53 @@ function formatDuration(totalSeconds) {
   return `${pad(minutes)}:${pad(seconds)}`;
 }
 
+let toastTimeout = null;
+
+function hideToast() {
+  const toast = document.getElementById('toast');
+  if (!toast) return;
+  if (toastTimeout) {
+    clearTimeout(toastTimeout);
+    toastTimeout = null;
+  }
+  toast.classList.remove('translate-y-0', 'opacity-100');
+  toast.classList.add('translate-y-20', 'opacity-0', 'pointer-events-none');
+}
+
 function showToast(message, type = 'info') {
   const toast = document.getElementById('toast');
+  if (!toast) return;
   const msgEl = document.getElementById('toast-message');
   const iconEl = document.getElementById('toast-icon');
 
-  msgEl.textContent = message;
-
-  if (type === 'success') {
-    toast.className = 'fixed bottom-5 right-5 z-50 max-w-sm rounded-2xl p-4 text-white shadow-2xl transition-all transform translate-y-0 opacity-100 flex items-center gap-3 bg-emerald-600';
-    iconEl.className = 'fa-solid fa-circle-check text-xl';
-  } else if (type === 'error') {
-    toast.className = 'fixed bottom-5 right-5 z-50 max-w-sm rounded-2xl p-4 text-white shadow-2xl transition-all transform translate-y-0 opacity-100 flex items-center gap-3 bg-rose-600';
-    iconEl.className = 'fa-solid fa-circle-xmark text-xl';
-  } else {
-    toast.className = 'fixed bottom-5 right-5 z-50 max-w-sm rounded-2xl p-4 text-white shadow-2xl transition-all transform translate-y-0 opacity-100 flex items-center gap-3 bg-slate-900';
-    iconEl.className = 'fa-solid fa-circle-info text-xl text-fpt-orange';
+  if (toastTimeout) {
+    clearTimeout(toastTimeout);
+    toastTimeout = null;
   }
 
-  setTimeout(() => {
-    toast.classList.add('translate-y-20', 'opacity-0', 'pointer-events-none');
-  }, 3500);
+  if (msgEl) msgEl.textContent = message;
+
+  // Xóa các class màu nền và class ẩn cũ
+  toast.classList.remove('bg-emerald-600', 'bg-rose-600', 'bg-slate-900', 'translate-y-20', 'opacity-0', 'pointer-events-none');
+
+  if (type === 'success') {
+    toast.classList.add('bg-emerald-600');
+    if (iconEl) iconEl.className = 'fa-solid fa-circle-check text-xl flex-shrink-0';
+  } else if (type === 'error') {
+    toast.classList.add('bg-rose-600');
+    if (iconEl) iconEl.className = 'fa-solid fa-circle-xmark text-xl flex-shrink-0';
+  } else {
+    toast.classList.add('bg-slate-900');
+    if (iconEl) iconEl.className = 'fa-solid fa-circle-info text-xl text-fpt-orange flex-shrink-0';
+  }
+
+  // Hiển thị toast với hiệu ứng trượt mượt mà
+  toast.classList.add('translate-y-0', 'opacity-100');
+
+  // Tự động ẩn sau 2.5 giây
+  toastTimeout = setTimeout(() => {
+    hideToast();
+  }, 2500);
 }
 
 function escapeHtml(str) {

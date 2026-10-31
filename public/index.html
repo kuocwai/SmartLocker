@@ -268,9 +268,12 @@
   </div>
 
   <!-- Toast Thông Báo Góc Màn Hình -->
-  <div id="toast" class="fixed bottom-5 right-5 z-50 max-w-sm rounded-2xl p-4 text-white shadow-2xl transition-all transform translate-y-20 opacity-0 pointer-events-none flex items-center gap-3">
-    <i id="toast-icon" class="fa-solid fa-circle-check text-xl"></i>
-    <span id="toast-message" class="text-xs sm:text-sm font-semibold">Nội dung thông báo</span>
+  <div id="toast" class="fixed bottom-5 right-5 z-50 max-w-sm rounded-2xl p-4 text-white shadow-2xl transition-all duration-300 transform translate-y-20 opacity-0 pointer-events-none flex items-center gap-3">
+    <i id="toast-icon" class="fa-solid fa-circle-check text-xl flex-shrink-0"></i>
+    <span id="toast-message" class="text-xs sm:text-sm font-semibold flex-1">Nội dung thông báo</span>
+    <button type="button" onclick="hideToast()" class="text-white/80 hover:text-white hover:bg-white/20 p-1.5 rounded-full transition-colors focus:outline-none flex-shrink-0" title="Đóng thông báo">
+      <i class="fa-solid fa-xmark text-sm"></i>
+    </button>
   </div>
 
   <!-- Footer -->

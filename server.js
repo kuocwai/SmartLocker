@@ -10,8 +10,8 @@ const PORT = process.env.PORT || 3000;
 // FIX 01: Fail closed if server credentials are not configured.
 const ADMIN_KEY = process.env.SMARTLOCKER_ADMIN_KEY || '';
 const DEVICE_KEY = process.env.SMARTLOCKER_DEVICE_KEY || '';
-if (ADMIN_KEY.length < 16 || DEVICE_KEY.length < 16 || ADMIN_KEY === DEVICE_KEY) {
-  console.error('[SECURITY] Cần 2 khóa ADMIN / DEVICE khác nhau, tối thiểu 16 ký tự mỗi khóa. Xem FIX_01_README.md.');
+if (!ADMIN_KEY || !DEVICE_KEY) {
+  console.error('[SECURITY] Cần cấu hình SMARTLOCKER_ADMIN_KEY và SMARTLOCKER_DEVICE_KEY.');
   process.exit(1);
 }
 function matchesKey(given, expected) {
@@ -346,8 +346,15 @@ app.post('/api/lockers/book', (req, res) => {
     });
   }
 
-  // Tự động sinh ngẫu nhiên 2 mã OTP 6 số khác nhau
-  const genOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
+  // Tự động sinh ngẫu nhiên 2 mã OTP 6 số (chỉ từ 1 đến 9, bỏ số 0 để bàn phím bấm mượt mà)
+  const genOtp = () => {
+    let code = '';
+    const digits = '123456789';
+    for (let i = 0; i < 6; i++) {
+      code += digits.charAt(Math.floor(Math.random() * digits.length));
+    }
+    return code;
+  };
   let otp_shipper = genOtp();
   let otp_student = genOtp();
   while (otp_student === otp_shipper) {

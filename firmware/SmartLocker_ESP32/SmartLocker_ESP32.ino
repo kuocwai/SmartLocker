@@ -12,7 +12,7 @@
  *  - Công tắc từ MC-38 (Giám sát cửa đóng/mở): GPIO 26 (INPUT_PULLUP, LOW = Đóng, HIGH = Mở)
  *  - Màn hình LCD 20x4 I2C: SDA -> GPIO 21, SCL -> GPIO 22 (Địa chỉ I2C: 0x27)
  *  - Bo mở rộng bàn phím PCF8574 I2C: SDA -> GPIO 21, SCL -> GPIO 22 (Địa chỉ I2C: 0x20)
- *  - Hỗ trợ nhập mã OTP linh hoạt qua: Serial Monitor máy tính & Bàn phím ma trận I2C.
+ *  - Hỗ trợ nhập mã OTP linh hoạt qua: Serial Monitor máy tính & Bàn phím ma trận I2C.o
  * 
  * THƯ VIỆN CẦN CÀI ĐẶT TRÊN ARDUINO IDE:
  *  1. ArduinoJson (bản 6.x hoặc 7.x của Benoit Blanchon)
@@ -49,6 +49,7 @@ const String API_GET_LOCKERS   = "/api/lockers";
 #define PIN_RELAY_2       19   // Relay Ngăn 2 (Solenoid 12V, kích mức LOW)
 #define PIN_SENSOR_E18    25   // Cảm biến tiệm cận E18-D80NK (LOW = Có hàng, HIGH = Trống)
 #define PIN_SENSOR_MC38   26   // Công tắc từ MC-38 (LOW = Cửa đóng, HIGH = Cửa mở)
+#define PIN_BUZZER        27   // Còi Buzzer 5V qua Transistor S8050
 
 #define I2C_SDA_PIN       21   // Chân I2C SDA cho LCD và PCF8574
 #define I2C_SCL_PIN       22   // Chân I2C SCL cho LCD và PCF8574
@@ -61,6 +62,12 @@ const unsigned long SOLENOID_PULSE_MS = 800;
 
 // Khởi tạo đối tượng LCD 20 cột, 4 hàng
 LiquidCrystal_I2C lcd(LCD_I2C_ADDR, 20, 4);
+
+void beep(int ms) {
+  digitalWrite(PIN_BUZZER, HIGH);
+  delay(ms);
+  digitalWrite(PIN_BUZZER, LOW);
+}
 
 // ======================================================================================
 // 3. MÁY TRẠNG THÁI HỆ THỐNG (FINITE STATE MACHINE - FSM)
@@ -237,6 +244,7 @@ void verifyOtpWithServer(String otpCode) {
       String status = docResponse["status"] | "INVALID";
 
       if (status == "SUCCESS") {
+        beep(100); delay(50); beep(150);
         String role = docResponse["role"] | "";
         int compId  = docResponse["compartment_id"] | 1;
         currentActiveCompartment = compId;
@@ -269,6 +277,7 @@ void verifyOtpWithServer(String otpCode) {
         }
       } else {
         // Sai mã hoặc quá hạn SLA 120 phút
+        beep(250); delay(100); beep(250); delay(100); beep(250);
         Serial.println("[AUTH] THAT BAI: Ma OTP sai hoac don hang da bi huy/qua han SLA!");
         showMessageAndPause("    THONG BAO!      ", "  MA OTP KHONG DUNG ", " HOAC DA HET HAN SLA", " VUI LONG THU LAI!  ", 3000);
       }
@@ -370,8 +379,10 @@ void handleSerialOtpInput() {
       // Phím Enter: Nếu đã nhập đủ mã thì xác thực
       if (enteredOtp.length() >= 4) {
         Serial.println("\n[SERIAL] Xac thuc OTP dang nhap.");
-        verifyOtpWithServer(enteredOtp);
-      } else {
+        String code = enteredOtp;
+        enteredOtp = "";
+        verifyOtpWithServer(code);
+      } else if (enteredOtp.length() > 0) {
         Serial.println("\n[SERIAL] Ma OTP chua du do dai! (Can 6 so)");
         enteredOtp = "";
         displayIdleScreen();
@@ -390,16 +401,21 @@ void handleSerialOtpInput() {
 
     // Chỉ nhận ký tự số từ '0' đến '9'
     if (isDigit(c)) {
+      beep(40); // Bíp phím bấm
       if (enteredOtp.length() < OTP_LENGTH) {
         enteredOtp += c;
-        // Do not output entered OTP digits to Serial Monitor.
         displayIdleScreen();
 
         // Tự động kiểm tra ngay khi đủ 6 chữ số
         if (enteredOtp.length() == OTP_LENGTH) {
           Serial.println("[OTP] Da du 6 so! Tu dong gui xac thuc len Server...");
+          String code = enteredOtp;
+          enteredOtp = "";
           delay(200);
-          verifyOtpWithServer(enteredOtp);
+          verifyOtpWithServer(code);
+          // Xóa sạch bộ đệm Serial còn sót lại (như phím Enter đi kèm)
+          while (Serial.available() > 0) Serial.read();
+          return;
         }
       }
     }
@@ -413,11 +429,12 @@ void handleSerialOtpInput() {
 void checkI2CKeypadInput() {
   if (!pcf8574Available) return;
 
+  // Ma tran phim 4x4 da chuyen vi (Transpose) khop chuan voi phan cung thuc te
   const char keys[4][4] = {
-    {'1', '2', '3', 'A'},
-    {'4', '5', '6', 'B'},
-    {'7', '8', '9', 'C'},
-    {'*', '0', '#', 'D'}
+    {'1', '4', '7', '*'},
+    {'2', '5', '8', '0'},
+    {'3', '6', '9', '#'},
+    {'A', 'B', 'C', 'D'}
   };
 
   for (byte r = 0; r < 4; r++) {
@@ -441,6 +458,7 @@ void checkI2CKeypadInput() {
 
           // Phím '*' để XÓA mã
           if (pressedKey == '*') {
+            beep(60);
             enteredOtp = "";
             displayIdleScreen();
             delay(250);
@@ -449,6 +467,7 @@ void checkI2CKeypadInput() {
 
           // Phím '#' để XÁC NHẬN gửi mã
           if (pressedKey == '#') {
+            beep(60);
             if (enteredOtp.length() >= 4) {
               verifyOtpWithServer(enteredOtp);
             }
@@ -458,6 +477,7 @@ void checkI2CKeypadInput() {
 
           // Phím số
           if (isDigit(pressedKey)) {
+            beep(40); // Tiếng bíp phản hồi khi bấm phím
             if (enteredOtp.length() < OTP_LENGTH) {
               enteredOtp += pressedKey;
               displayIdleScreen();
@@ -488,12 +508,24 @@ void handleSensorStateMachine() {
   int e18Value  = digitalRead(PIN_SENSOR_E18);  // LOW = Có hàng, HIGH = Trống
   int mc38Value = digitalRead(PIN_SENSOR_MC38); // LOW = Đóng cửa, HIGH = Cửa đang mở
 
+  // In log cảm biến mỗi khi có thay đổi trạng thái trong lúc chờ giao/nhận đồ
+  static int lastLoggedE18 = -1, lastLoggedMC38 = -1;
+  if ((currentState == STATE_WAITING_DEPOSIT || currentState == STATE_WAITING_PICKUP) &&
+      (e18Value != lastLoggedE18 || mc38Value != lastLoggedMC38)) {
+    lastLoggedE18 = e18Value;
+    lastLoggedMC38 = mc38Value;
+    Serial.printf("[SENSOR-LIVE] E18(Do an): %s | MC38(Cua): %s\n",
+                  e18Value == LOW ? "CO DO (LOW)" : "TRONG (HIGH)",
+                  mc38Value == LOW ? "DONG (LOW)" : "MO (HIGH)");
+  }
+
   // 1. GIAI ĐOẠN SHIPPER GIAO ĐỒ: Chờ Shipper bỏ hàng VÀ đóng cửa
   if (currentState == STATE_WAITING_DEPOSIT) {
     // Điều kiện hoàn thành giao đồ: Có đồ ăn (E18 = LOW) VÀ Cửa đã đóng kín (MC-38 = LOW)
     if (e18Value == LOW && mc38Value == LOW) {
       if ((millis() - sensorDebounceTimer) > DEBOUNCE_DELAY) {
         Serial.printf("[FSM] XAC NHAN: SHIPPER DA BO DO VA DONG CUA NGAN %d!\n", currentActiveCompartment);
+        beep(100); delay(50); beep(150);
 
         // Gửi thông báo ITEM_STORED lên Backend Server (Kích hoạt SLA đếm ngược)
         updateLockerStatusToServer(currentActiveCompartment, "ITEM_STORED", "CLOSED", "DETECTED");
@@ -575,12 +607,16 @@ void setup() {
   Serial.println("  SMART FOOD & PARCEL LOCKER (ESP32 FIRMWARE) KHOI DONG ");
   Serial.println("========================================================");
 
-  // 2. Cấu hình chân GPIO đầu ra Relay (Khóa Solenoid)
+  // 2. Cấu hình chân GPIO đầu ra Relay (Khóa Solenoid) & Còi Buzzer
   // Mặc định ở mức HIGH (Ngắt relay, khóa chốt)
   pinMode(PIN_RELAY_1, OUTPUT);
   pinMode(PIN_RELAY_2, OUTPUT);
   digitalWrite(PIN_RELAY_1, HIGH);
   digitalWrite(PIN_RELAY_2, HIGH);
+
+  pinMode(PIN_BUZZER, OUTPUT);
+  digitalWrite(PIN_BUZZER, LOW);
+  beep(80); // Bíp chào khi khởi động bo
 
   // 3. Cấu hình chân GPIO đầu vào Cảm biến với điện trở kéo lên nội bộ
   pinMode(PIN_SENSOR_E18, INPUT_PULLUP);
