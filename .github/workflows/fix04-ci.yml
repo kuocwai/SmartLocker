@@ -1,0 +1,58 @@
+name: SmartLocker CI - Backend and ESP32
+
+on:
+  push:
+    branches:
+      - main
+      - 'fix/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-and-firmware-tests:
+    name: Node.js regression and native C++ tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install Node dependencies (JSON fallback, no SQLite native binary)
+        run: npm ci --omit=optional
+      - name: Confirm C++ compiler is available
+        run: g++ --version
+      - name: Run FIX 01-04 regression suite (all 18 tests, no skips expected)
+        run: node --test tests/fix01.test.js tests/fix02.test.js tests/fix03.test.js tests/fix03_remaining.test.js tests/fix04_firmware.test.js
+
+  esp32-firmware-compile:
+    name: Compile ESP32 Dev Module firmware
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ESP32_INDEX: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+        with:
+          version: '1.x'
+      - name: Install pinned ESP32 core
+        run: |
+          arduino-cli core update-index --additional-urls "$ESP32_INDEX"
+          arduino-cli core install esp32:esp32@3.3.12 --additional-urls "$ESP32_INDEX"
+      - name: Install required Arduino libraries
+        run: |
+          arduino-cli lib install 'ArduinoJson@6.21.5'
+          arduino-cli lib install 'LiquidCrystal I2C'
+      - name: Create dummy, CI-only device config (never use real secrets)
+        run: cp firmware/SmartLocker_ESP32/secrets.example.h firmware/SmartLocker_ESP32/secrets.h
+      - name: Compile complete firmware (no board or hardware required)
+        run: arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all firmware/SmartLocker_ESP32

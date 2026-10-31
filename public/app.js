@@ -7,6 +7,7 @@ let currentBookingCompId = 1;
 let currentShipperMessage = '';
 let activeTab = 'booking';
 let sseSource = null;
+let sseConnected = false;
 let adminKey = ''; // Only in memory; do not use localStorage or query strings.
 const isAdminPage = /(?:^|\/)admin(?:\.html)?$/.test(window.location.pathname);
 
@@ -42,10 +43,10 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchSystemInfo();
   fetchHistory();
 
-  // Polling dự phòng mỗi 3 giây nếu SSE gặp sự cố
+  // Use periodic polling ONLY if SSE is unavailable/disconnected.
   setInterval(() => {
-    fetchLockerData(false);
-  }, 3000);
+    if (!sseConnected) fetchLockerData(false);
+  }, 10000);
 
   // Cập nhật nhịp đếm SLA mỗi giây
   setInterval(updateLiveSlaTimers, 1000);
@@ -67,6 +68,9 @@ function setupSSE() {
     sseSource = new EventSource('/api/events');
 
     sseSource.onopen = () => {
+      sseConnected = true;
+      fetchLockerData(false); // reconcile state after reconnect
+      fetchHistory();
       if (indicator) indicator.className = 'h-2 w-2 rounded-full bg-emerald-500';
       if (statusTxt) statusTxt.textContent = 'Realtime';
     };
@@ -83,6 +87,7 @@ function setupSSE() {
     };
 
     sseSource.onerror = () => {
+      sseConnected = false;
       if (indicator) indicator.className = 'h-2 w-2 rounded-full bg-amber-500';
       if (statusTxt) statusTxt.textContent = 'Polling';
     };
@@ -180,7 +185,7 @@ function renderBookingTab(lockers) {
       orderBox.classList.add('hidden');
       btnBook.disabled = false;
       btnBook.className = 'w-full py-3.5 px-6 rounded-2xl font-bold text-white text-sm sm:text-base bg-emerald-600 hover:bg-emerald-700 shadow-md shadow-emerald-600/20 active:scale-[0.99] transition cursor-pointer flex items-center justify-center gap-2';
-      btnBook.innerHTML = `<i class="fa-solid fa-plus-circle"></i><span>Đặt Ngăn Số ${id}</span>`;
+      btnBook.innerHTML = `<i class="fa-solid fa-plus-circle"></i><span>Đặt Ngăn Số ${escapeHtml(id)}</span>`;
 
     } else if (locker.status === 'WAITING_DELIVERY') {
       card.classList.add('state-waiting');
@@ -197,8 +202,8 @@ function renderBookingTab(lockers) {
         orderBox.classList.remove('hidden');
         orderBox.innerHTML = `
           <div class="flex justify-between font-semibold text-slate-800">
-            <span>Đơn #${locker.active_order.id} · SĐT: ${escapeHtml(locker.active_order.customer_phone)}</span>
-            <span class="text-amber-700">Mã Shipper: <strong class="font-mono text-sm">${locker.active_order.otp_shipper}</strong></span>
+            <span>Đơn #${escapeHtml(locker.active_order.id)} · SĐT: ${escapeHtml(locker.active_order.customer_phone)}</span>
+            <span class="text-amber-700">Mã Shipper: <strong class="font-mono text-sm">${escapeHtml(locker.active_order.otp_shipper)}</strong></span>
           </div>
         `;
       }
@@ -223,11 +228,11 @@ function renderBookingTab(lockers) {
         orderBox.innerHTML = `
           <div class="flex justify-between font-semibold text-slate-800">
             <span>SĐT nhận: <strong>${escapeHtml(locker.active_order.customer_phone)}</strong></span>
-            <span class="text-emerald-700">Mã SV: <strong class="font-mono text-sm">${locker.active_order.otp_student}</strong></span>
+            <span class="text-emerald-700">Mã SV: <strong class="font-mono text-sm">${escapeHtml(locker.active_order.otp_student)}</strong></span>
           </div>
           <div class="flex justify-between items-center pt-1 border-t border-slate-200/60 mt-1">
             <span class="text-slate-500">Trạng thái an toàn SLA:</span>
-            <span class="font-bold text-rose-600">${locker.sla ? locker.sla.message : 'Đang lưu trữ'}</span>
+            <span class="font-bold text-rose-600">${escapeHtml(locker.sla ? locker.sla.message : 'Đang lưu trữ')}</span>
           </div>
         `;
       }
@@ -354,14 +359,14 @@ function renderDashboardTab(lockers) {
       const stId = o.student_id ? ` [${escapeHtml(o.student_id)}]` : '';
       orderInfo.innerHTML = `
         <div class="flex justify-between items-center font-bold text-slate-800">
-          <span>Đơn hàng #${o.id}</span>
+          <span>Đơn hàng #${escapeHtml(o.id)}</span>
           <span class="text-xs text-slate-400">${new Date(o.created_at).toLocaleTimeString('vi-VN')}</span>
         </div>
         <div><strong>Người nhận:</strong> ${escapeHtml(o.customer_name)}${stId} - ${escapeHtml(o.customer_phone)}</div>
         ${o.order_notes ? `<div><strong>Ghi chú:</strong> ${escapeHtml(o.order_notes)}</div>` : ''}
         <div class="pt-1.5 flex gap-2 font-mono text-[11px]">
-          <span class="bg-amber-100 text-amber-900 px-2 py-0.5 rounded">Mã Shipper: <b>${o.otp_shipper}</b></span>
-          <span class="bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded">Mã SV: <b>${o.otp_student}</b></span>
+          <span class="bg-amber-100 text-amber-900 px-2 py-0.5 rounded">Mã Shipper: <b>${escapeHtml(o.otp_shipper)}</b></span>
+          <span class="bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded">Mã SV: <b>${escapeHtml(o.otp_student)}</b></span>
         </div>
       `;
     } else {
@@ -384,7 +389,7 @@ function renderHistoryTable(orders) {
     if (order.status === 'COMPLETED') {
       statusBadge = '<span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">HOÀN TẤT</span>';
     } else if (order.status === 'ABANDONED') {
-      statusBadge = '<span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">QUÁ HẠN (HỦY)</span>';
+      statusBadge = '<span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">QUÁ HẠN (CẦN XỬ LÝ)</span>';
     } else if (order.status === 'STORED') {
       statusBadge = '<span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">ĐANG LƯU</span>';
     } else {
@@ -395,8 +400,8 @@ function renderHistoryTable(orders) {
 
     return `
       <tr class="hover:bg-slate-50 transition">
-        <td class="py-3 px-4 font-mono font-bold text-slate-900">#${order.id}</td>
-        <td class="py-3 px-4 font-semibold text-slate-800">Ngăn ${order.compartment_id}</td>
+        <td class="py-3 px-4 font-mono font-bold text-slate-900">#${escapeHtml(order.id)}</td>
+        <td class="py-3 px-4 font-semibold text-slate-800">Ngăn ${escapeHtml(order.compartment_id)}</td>
         <td class="py-3 px-4 font-medium">${escapeHtml(order.customer_name)}</td>
         <td class="py-3 px-4 font-mono font-semibold text-slate-700">${escapeHtml(order.student_id || '-')}</td>
         <td class="py-3 px-4 text-slate-500 font-mono">${escapeHtml(order.customer_phone)}</td>
@@ -435,7 +440,7 @@ function checkGlobalSLAWarnings(lockers) {
     alertBox.classList.remove('hidden');
     if (warnedLocker.sla.stage === 'ABANDONED') {
       alertBox.className = 'rounded-2xl p-4 bg-rose-50 border border-rose-300 text-rose-900 shadow-sm flex items-start gap-3.5 transition-all';
-      alertTxt.textContent = `Ngăn ${warnedLocker.id} đã lưu trữ vượt quá 120 phút! Món ăn đã bị hủy để đảm bảo an toàn thực phẩm.`;
+      alertTxt.textContent = `Ngăn ${warnedLocker.id} đã lưu trữ vượt quá 120 phút! Cần kiểm tra và xử lý thủ công, không tự giải phóng ngăn.`;
     } else {
       alertBox.className = 'rounded-2xl p-4 bg-amber-50 border border-amber-300 text-amber-900 shadow-sm flex items-start gap-3.5 transition-all';
       alertTxt.textContent = `Ngăn ${warnedLocker.id} đã lưu trữ hơn 45 phút! Đồ ăn sắp nguội, vui lòng nhắc nhở sinh viên đến nhận.`;
