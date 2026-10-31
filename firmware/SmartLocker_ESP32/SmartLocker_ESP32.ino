@@ -258,7 +258,6 @@ void verifyOtpWithServer(String otpCode) {
   }
 
   beep(100); delay(50); beep(150);
-  }
 
   currentActiveCompartment = compId;
   fix04DoorCycle.begin(millis());
