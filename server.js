@@ -81,7 +81,10 @@ function recordOtpFailure(req) {
   otpFailures.set(req.ip, e);
 }
 
-// Middleware: same-origin browser API; don't allow unrestricted CORS.
+// CORS: allow ESP32 and browser access when deployed to cloud (Railway).
+const cors = require('cors');
+const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
+app.use(cors({ origin: CORS_ORIGIN }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

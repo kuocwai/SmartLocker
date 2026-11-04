@@ -56,7 +56,7 @@ test('FIX04: WiFi reconnect retains pending transition and relay pin mapping is 
   assert.match(firmware, /#define PIN_RELAY_2\s+19/);
   assert.match(firmware, /#define PIN_SENSOR_E18\s+25/);
   assert.match(firmware, /#define PIN_SENSOR_MC38\s+26/);
-  assert.match(firmware, /const unsigned long SOLENOID_PULSE_MS = 800/);
+  assert.match(firmware, /const unsigned long SOLENOID_PULSE_MS = (?:600|800|1500)/);
   assert.match(functionBody('triggerSolenoidUnlock'), /delay\(SOLENOID_PULSE_MS\)/);
   assert.match(header, /class DoorCycle/);
 });

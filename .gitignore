@@ -33,3 +33,4 @@ data/*.json
 firmware/SmartLocker_ESP32/secrets.h
 secrets.bat
 .env
+firmware/SmartLocker_ESP32_Cloud/secrets.h

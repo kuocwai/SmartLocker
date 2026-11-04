@@ -59,7 +59,7 @@ const String API_GET_LOCKERS   = "/api/lockers";
 #define PCF8574_I2C_ADDR  0x20 // Địa chỉ I2C của bo đệm Keypad PCF8574
 
 // Thời gian giữ xung kích mở khóa Solenoid (0.8 giây = 800 mili-giây)
-const unsigned long SOLENOID_PULSE_MS = 800;
+const unsigned long SOLENOID_PULSE_MS = 600;
 
 // Khởi tạo đối tượng LCD 20 cột, 4 hàng
 LiquidCrystal_I2C lcd(LCD_I2C_ADDR, 20, 4);
@@ -194,7 +194,7 @@ void showMessageAndPause(String l0, String l1, String l2, String l3, unsigned lo
 void triggerSolenoidUnlock(int compartmentId) {
   int relayPin = (compartmentId == 1) ? PIN_RELAY_1 : PIN_RELAY_2;
   
-  Serial.printf("[SOLENOID] >>> KICH MO KHOA NGAN %d (GPIO %d: LOW 0.8s) <<<\n", compartmentId, relayPin);
+  Serial.printf("[SOLENOID] >>> KICH MO KHOA NGAN %d (GPIO %d: LOW 0.6s) <<<\n", compartmentId, relayPin);
   
   // Kích mức LOW (Rơ le đóng, cấp nguồn 12V vào cuộn chốt Solenoid bung ra)
   digitalWrite(relayPin, LOW);
@@ -261,7 +261,7 @@ void verifyOtpWithServer(String otpCode) {
 
   currentActiveCompartment = compId;
   fix04DoorCycle.begin(millis());
-  triggerSolenoidUnlock(compId); // 800ms pulse unchanged.
+  triggerSolenoidUnlock(compId); // 0.6s pulse for snappy mechanical pop
   if (role == "SHIPPER") {
     lcdPrintLine(0, " XIN CHAO SHIPPER!  ", true);
     lcdPrintLine(1, "HAY BO HANG VAO NGAN", true);
