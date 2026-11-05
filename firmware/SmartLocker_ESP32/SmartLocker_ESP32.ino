@@ -49,8 +49,13 @@ const String API_GET_LOCKERS   = "/api/lockers";
 #define PIN_RELAY_1       18   // Relay Ngăn 1 (Solenoid 12V, kích mức LOW)
 #define PIN_RELAY_2       19   // Relay Ngăn 2 (Solenoid 12V, kích mức LOW)
 #define PIN_SENSOR_E18    25   // Cảm biến tiệm cận E18-D80NK (LOW = Có hàng, HIGH = Trống)
+#define PIN_SENSOR_E18_2  32   // Cảm biến tiệm cận E18-D80NK Ngăn 2
+#define PIN_SENSOR_MC38_2 33   // Công tắc từ MC-38 Ngăn 2
 #define PIN_SENSOR_MC38   26   // Công tắc từ MC-38 (LOW = Cửa đóng, HIGH = Cửa mở)
 #define PIN_BUZZER        27   // Còi Buzzer 5V qua Transistor S8050
+
+// Chế độ MC-38 ảo: Đặt true khi không gắn công tắc từ MC-38 (tự động hóa qua cảm biến E18-D80NK)
+#define VIRTUAL_MC38_MODE true
 
 #define I2C_SDA_PIN       21   // Chân I2C SDA cho LCD và PCF8574
 #define I2C_SCL_PIN       22   // Chân I2C SCL cho LCD và PCF8574
@@ -502,9 +507,39 @@ void checkI2CKeypadInput() {
  * Xử lý máy trạng thái sau khi đã mở khóa cửa
  */
 void handleSensorStateMachine() {
-  const int e18Value = digitalRead(PIN_SENSOR_E18);    // LOW = item detected.
-  const int mc38Value = digitalRead(PIN_SENSOR_MC38);  // LOW = door closed.
+  const int activeE18Pin = (currentActiveCompartment == 2) ? PIN_SENSOR_E18_2 : PIN_SENSOR_E18;
+  const int activeMC38Pin = (currentActiveCompartment == 2) ? PIN_SENSOR_MC38_2 : PIN_SENSOR_MC38;
+  const int e18Value = digitalRead(activeE18Pin);    // LOW = item detected.
+  int mc38Value = digitalRead(activeMC38Pin);  // LOW = door closed.
   const unsigned long now = millis();
+
+#if VIRTUAL_MC38_MODE
+  // Che do MC-38 ao: Tu dong hoa qua E18, khong can dau day MC-38
+  static unsigned long e18StableSince = 0;
+  if (currentState == STATE_WAITING_DEPOSIT || currentState == STATE_WAITING_PICKUP) {
+    const bool isDeposit = (currentState == STATE_WAITING_DEPOSIT);
+    const bool expectedItem = isDeposit ? (e18Value == LOW) : (e18Value == HIGH);
+
+    if (now - stateTimer < 600) {
+      mc38Value = HIGH; // Vua bung khoa: Cua mo
+      e18StableSince = 0;
+    } else {
+      if (expectedItem) {
+        if (e18StableSince == 0) e18StableSince = now;
+        if (now - e18StableSince >= 1000) {
+          mc38Value = LOW; // Nhan dien vat the on dinh 1 giay -> Tu dong xac nhan dong cua
+        } else {
+          mc38Value = HIGH;
+        }
+      } else {
+        e18StableSince = 0;
+        mc38Value = HIGH;
+      }
+    }
+  } else if (currentState == STATE_PENDING_UPDATE) {
+    mc38Value = LOW;
+  }
+#endif
 
   // In log cảm biến mỗi khi có thay đổi trạng thái trong lúc chờ giao/nhận đồ
   static int lastLoggedE18 = -1, lastLoggedMC38 = -1;
@@ -609,6 +644,8 @@ void setup() {
   // 3. Cấu hình chân GPIO đầu vào Cảm biến với điện trở kéo lên nội bộ
   pinMode(PIN_SENSOR_E18, INPUT_PULLUP);
   pinMode(PIN_SENSOR_MC38, INPUT_PULLUP);
+  pinMode(PIN_SENSOR_E18_2, INPUT_PULLUP);
+  pinMode(PIN_SENSOR_MC38_2, INPUT_PULLUP);
 
   // 4. Khởi tạo bus I2C và màn hình LCD 20x4
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);

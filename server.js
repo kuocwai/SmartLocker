@@ -542,7 +542,8 @@ app.get('/api/orders/history', requireAdmin, (req, res) => {
 
 // 7. Reset toàn bộ 2 ngăn tủ về AVAILABLE (Dành cho demo / thuyết trình)
 app.post('/api/lockers/reset', requireAdmin, (req, res) => {
-  if (db.getLockers().some(l => l.item_state === 'DETECTED' || l.status === 'STORED' || l.status === 'ABANDONED')) {
+  const force = req.body && req.body.force === true;
+  if (!force && db.getLockers().some(l => l.item_state === 'DETECTED' || l.status === 'STORED' || l.status === 'ABANDONED')) {
     return res.status(409).json({ success: false, message: 'Tủ còn hàng hoặc đơn quá hạn; cần kiểm tra và xử lý thủ công trước khi reset.' });
   }
   const resetLockers = db.resetAllLockers().map(enrichLockerWithSLA);

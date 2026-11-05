@@ -707,12 +707,18 @@ async function simFastForward(compId, minutes) {
 async function simResetAllLockers() {
   if (!confirm('Bạn có chắc chắn muốn đặt lại cả 2 ngăn tủ về trạng thái trống (AVAILABLE)?')) return;
   try {
-    const res = await adminFetch('/api/lockers/reset', { method: 'POST' });
+    const res = await adminFetch('/api/lockers/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force: true })
+    });
     const data = await res.json();
     if (data.success) {
       showToast('Đã đặt lại toàn bộ ngăn tủ thành công!', 'success');
       fetchLockerData();
       fetchHistory();
+    } else {
+      showToast(data.message || 'Lỗi khi đặt lại tủ!', 'error');
     }
   } catch (err) {
     showToast('Lỗi khi đặt lại tủ!', 'error');
