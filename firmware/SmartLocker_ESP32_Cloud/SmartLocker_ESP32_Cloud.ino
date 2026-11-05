@@ -584,10 +584,10 @@ void setup() {
   Serial.println("  SMART LOCKER (CLOUD / RAILWAY) FIRMWARE KHOI DONG");
   Serial.println("========================================================");
 
-  pinMode(PIN_RELAY_1, OUTPUT);
-  pinMode(PIN_RELAY_2, OUTPUT);
   digitalWrite(PIN_RELAY_1, HIGH);
   digitalWrite(PIN_RELAY_2, HIGH);
+  pinMode(PIN_RELAY_1, OUTPUT);
+  pinMode(PIN_RELAY_2, OUTPUT);
 
   pinMode(PIN_BUZZER, OUTPUT);
   digitalWrite(PIN_BUZZER, LOW);
