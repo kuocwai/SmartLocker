@@ -104,6 +104,7 @@ const unsigned long FIX04_RETRY_MS = 3000;
 unsigned long lastWiFiCheckTimer = 0;
 unsigned long lastStatusSyncTimer = 0;
 bool pcf8574Available = false;
+bool manualConfirmRequested = false;
 
 String locker1StateStr = "TRONG";
 String locker2StateStr = "TRONG";
@@ -426,6 +427,15 @@ void checkI2CKeypadInput() {
         if (!(inByte & (1 << (c + 4)))) {
           char pressedKey = keys[r][c];
           Serial.printf("[KEYPAD] Phim duoc nhan: %c\n", pressedKey);
+          if (currentState == STATE_WAITING_DEPOSIT || currentState == STATE_WAITING_PICKUP) {
+            if (pressedKey == '#' || pressedKey == '*') {
+              beep(80); delay(40); beep(80);
+              manualConfirmRequested = true;
+              Serial.println("[KEYPAD] Bam [#] xac nhan hoan tat chu trinh thu cong!");
+              delay(300);
+              return;
+            }
+          }
           if (pressedKey == '*') {
             beep(60);
             enteredOtp = "";
@@ -471,20 +481,36 @@ void handleSensorStateMachine() {
   const unsigned long now = millis();
 
 #if VIRTUAL_MC38_MODE
-  // Chế độ MC-38 ảo: Không cần gắn cảm biến từ MC-38, tự động nhận diện qua cảm biến E18
+  // Chế độ MC-38 ảo: Tự động hóa qua E18 (500ms) + Phím [#] xác nhận thủ công dự phòng
   static unsigned long e18StableSince = 0;
+  static int lastFeedback = -1;
   if (currentState == STATE_WAITING_DEPOSIT || currentState == STATE_WAITING_PICKUP) {
     const bool isDeposit = (currentState == STATE_WAITING_DEPOSIT);
     const bool expectedItem = isDeposit ? (e18Value == LOW) : (e18Value == HIGH);
+
+    // Phản hồi trực tiếp trên Dòng 3 LCD để người dùng biết mắt thần có bắt được đồ chưa
+    int currentFb = expectedItem ? 1 : 0;
+    if (currentFb != lastFeedback) {
+      lastFeedback = currentFb;
+      if (expectedItem) {
+        lcdPrintLine(3, isDeposit ? ">> DA THAY DO AN! <<" : ">> DA LAY HET DO! <<", true);
+      } else {
+        lcdPrintLine(3, "HOAC BAM [#] DE XONG", true);
+      }
+    }
 
     if (now - stateTimer < 600) {
       mc38Value = HIGH; // Vừa bung khóa: Cửa mở
       e18StableSince = 0;
     } else {
-      if (expectedItem) {
+      if (manualConfirmRequested) {
+        manualConfirmRequested = false;
+        mc38Value = LOW; // Xác nhận tức thì qua phím [#]
+        Serial.println("[SENSOR] Hoan tat chu trinh qua phim [#]");
+      } else if (expectedItem) {
         if (e18StableSince == 0) e18StableSince = now;
-        if (now - e18StableSince >= 1000) {
-          mc38Value = LOW; // Nhận diện vật thể ổn định 1 giây -> Tự động xác nhận đóng cửa
+        if (now - e18StableSince >= 500) {
+          mc38Value = LOW; // Nhận diện vật thể ổn định 0.5 giây -> Tự động xác nhận đóng cửa
         } else {
           mc38Value = HIGH;
         }
@@ -493,8 +519,11 @@ void handleSensorStateMachine() {
         mc38Value = HIGH;
       }
     }
-  } else if (currentState == STATE_PENDING_UPDATE) {
-    mc38Value = LOW;
+  } else {
+    lastFeedback = -1;
+    if (currentState == STATE_PENDING_UPDATE) {
+      mc38Value = LOW;
+    }
   }
 #endif
 
@@ -672,6 +701,8 @@ void loop() {
 
   if (currentState == STATE_IDLE) {
     handleSerialOtpInput();
+    checkI2CKeypadInput();
+  } else if (currentState == STATE_WAITING_DEPOSIT || currentState == STATE_WAITING_PICKUP) {
     checkI2CKeypadInput();
   }
 
