@@ -49,12 +49,7 @@ const int HTTP_TIMEOUT_MS = 8000;
 #define PIN_RELAY_2       19
 #define PIN_SENSOR_E18    25
 #define PIN_SENSOR_MC38   26
-#define PIN_SENSOR_E18_2  32
-#define PIN_SENSOR_MC38_2 33
 #define PIN_BUZZER        27
-
-// Chế độ MC-38 ảo: Đặt true khi không gắn công tắc từ MC-38 (tự động hóa qua cảm biến E18-D80NK)
-#define VIRTUAL_MC38_MODE true
 
 #define I2C_SDA_PIN       21
 #define I2C_SCL_PIN       22
@@ -105,8 +100,8 @@ unsigned long lastWiFiCheckTimer = 0;
 unsigned long lastStatusSyncTimer = 0;
 bool pcf8574Available = false;
 
-String locker1StateStr = "TRONG";
-String locker2StateStr = "TRONG";
+String locker1StateStr = "[TRONG]";
+String locker2StateStr = "[TRONG]";
 
 // ======================================================================================
 // 4. CÁC HÀM TIỆN ÍCH HIỂN THỊ LCD 20x4
@@ -132,7 +127,7 @@ void lcdPrintLine(uint8_t row, String text, bool center = false) {
 
 void displayIdleScreen() {
   lcdPrintLine(0, "TRAM GIU HANG FPT", true);
-  lcdPrintLine(1, "N1:" + locker1StateStr + " | N2:" + locker2StateStr, true);
+  lcdPrintLine(1, "N1:" + locker1StateStr + " N2:" + locker2StateStr, true);
   
   if (enteredOtp.length() == 0) {
     lcdPrintLine(2, "NHAP MA OTP (6 SO):", false);
@@ -348,11 +343,11 @@ void syncLockersStateFromServer() {
   for (JsonObject locker : lockers) {
     const int id = locker["id"] | 0;
     const String status = locker["status"] | "";
-    String label = "???";
-    if (status == "AVAILABLE") label = "TRONG";
-    else if (status == "WAITING_DELIVERY") label = "CHO  ";
-    else if (status == "STORED") label = "CO DO";
-    else if (status == "ABANDONED") label = "QUA H";
+    String label = "[???]";
+    if (status == "AVAILABLE") label = "[TRONG]";
+    else if (status == "WAITING_DELIVERY") label = "[CHO GIAO]";
+    else if (status == "STORED") label = "[CO HANG]";
+    else if (status == "ABANDONED") label = "[QUA HAN]";
     if (id == 1) locker1StateStr = label;
     if (id == 2) locker2StateStr = label;
   }
@@ -464,39 +459,9 @@ void checkI2CKeypadInput() {
 // 8. MÁY TRẠNG THÁI GIÁM SÁT CẢM BIẾN
 // ======================================================================================
 void handleSensorStateMachine() {
-  const int activeE18Pin = (currentActiveCompartment == 2) ? PIN_SENSOR_E18_2 : PIN_SENSOR_E18;
-  const int activeMC38Pin = (currentActiveCompartment == 2) ? PIN_SENSOR_MC38_2 : PIN_SENSOR_MC38;
-  const int e18Value = digitalRead(activeE18Pin);
-  int mc38Value = digitalRead(activeMC38Pin);
+  const int e18Value = digitalRead(PIN_SENSOR_E18);
+  const int mc38Value = digitalRead(PIN_SENSOR_MC38);
   const unsigned long now = millis();
-
-#if VIRTUAL_MC38_MODE
-  // Chế độ MC-38 ảo: Không cần gắn cảm biến từ MC-38, tự động nhận diện qua cảm biến E18
-  static unsigned long e18StableSince = 0;
-  if (currentState == STATE_WAITING_DEPOSIT || currentState == STATE_WAITING_PICKUP) {
-    const bool isDeposit = (currentState == STATE_WAITING_DEPOSIT);
-    const bool expectedItem = isDeposit ? (e18Value == LOW) : (e18Value == HIGH);
-
-    if (now - stateTimer < 600) {
-      mc38Value = HIGH; // Vừa bung khóa: Cửa mở
-      e18StableSince = 0;
-    } else {
-      if (expectedItem) {
-        if (e18StableSince == 0) e18StableSince = now;
-        if (now - e18StableSince >= 1000) {
-          mc38Value = LOW; // Nhận diện vật thể ổn định 1 giây -> Tự động xác nhận đóng cửa
-        } else {
-          mc38Value = HIGH;
-        }
-      } else {
-        e18StableSince = 0;
-        mc38Value = HIGH;
-      }
-    }
-  } else if (currentState == STATE_PENDING_UPDATE) {
-    mc38Value = LOW;
-  }
-#endif
 
   static int lastLoggedE18 = -1, lastLoggedMC38 = -1;
   if ((currentState == STATE_WAITING_DEPOSIT || currentState == STATE_WAITING_PICKUP) &&
@@ -523,16 +488,14 @@ void handleSensorStateMachine() {
     }
   } else if (currentState == STATE_PENDING_UPDATE) {
     const bool isDeposit = fix04PendingEvent == "ITEM_STORED";
-#if !VIRTUAL_MC38_MODE
     if (mc38Value != LOW || (isDeposit ? e18Value != LOW : e18Value != HIGH)) {
       currentState = STATE_NEEDS_ATTENTION;
-      lcdPrintLine(0, "LOI CAM BIEN!", true);
+      lcdPrintLine(0, "CAN KIEM TRA CAM BIEN", true);
       lcdPrintLine(1, "TRANG THAI DA DOI", true);
       lcdPrintLine(2, "KHONG NHAP OTP MOI", true);
       lcdPrintLine(3, "BAO NGUOI QUAN TRI", true);
       return;
     }
-#endif
     if (static_cast<unsigned long>(now - fix04LastPostAttempt) < FIX04_RETRY_MS) return;
     fix04LastPostAttempt = now;
     const Fix04PostResult result = updateLockerStatusToServer(
@@ -584,10 +547,10 @@ void setup() {
   Serial.println("  SMART LOCKER (CLOUD / RAILWAY) FIRMWARE KHOI DONG");
   Serial.println("========================================================");
 
-  digitalWrite(PIN_RELAY_1, HIGH);
-  digitalWrite(PIN_RELAY_2, HIGH);
   pinMode(PIN_RELAY_1, OUTPUT);
   pinMode(PIN_RELAY_2, OUTPUT);
+  digitalWrite(PIN_RELAY_1, HIGH);
+  digitalWrite(PIN_RELAY_2, HIGH);
 
   pinMode(PIN_BUZZER, OUTPUT);
   digitalWrite(PIN_BUZZER, LOW);
@@ -595,8 +558,6 @@ void setup() {
 
   pinMode(PIN_SENSOR_E18, INPUT_PULLUP);
   pinMode(PIN_SENSOR_MC38, INPUT_PULLUP);
-  pinMode(PIN_SENSOR_E18_2, INPUT_PULLUP);
-  pinMode(PIN_SENSOR_MC38_2, INPUT_PULLUP);
 
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
   lcd.init();
