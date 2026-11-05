@@ -288,15 +288,17 @@ function renderDashboardTab(lockers) {
 
     statusTxt.textContent = locker.status;
 
-    // Door sensor
-    if (locker.door_state === 'OPEN') {
-      valDoor.textContent = 'Đang mở cửa';
-      valDoor.className = 'text-amber-600';
-      iconDoor.className = 'fa-solid fa-door-open text-amber-500';
-    } else {
-      valDoor.textContent = 'Đã đóng kín';
-      valDoor.className = 'text-slate-800';
-      iconDoor.className = 'fa-solid fa-door-closed text-emerald-600';
+    // Door sensor (nếu có hiển thị)
+    if (valDoor && iconDoor) {
+      if (locker.door_state === 'OPEN') {
+        valDoor.textContent = 'Đang mở cửa';
+        valDoor.className = 'text-amber-600';
+        iconDoor.className = 'fa-solid fa-door-open text-amber-500';
+      } else {
+        valDoor.textContent = 'Đã đóng kín';
+        valDoor.className = 'text-slate-800';
+        iconDoor.className = 'fa-solid fa-door-closed text-emerald-600';
+      }
     }
 
     // Item sensor
@@ -701,6 +703,27 @@ async function simFastForward(compId, minutes) {
     }
   } catch (err) {
     showToast('Lỗi tua nhanh thời gian!', 'error');
+  }
+}
+
+async function simResetLocker(compId) {
+  if (!confirm(`Bạn có chắc chắn muốn đặt lại Ngăn ${compId} về trạng thái trống (AVAILABLE)?`)) return;
+  try {
+    const res = await adminFetch('/api/lockers/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ compartment_id: compId, force: true })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Đã đặt lại Ngăn ${compId} thành công!`, 'success');
+      fetchLockerData();
+      fetchHistory();
+    } else {
+      showToast(data.message || 'Lỗi khi đặt lại ngăn tủ!', 'error');
+    }
+  } catch (err) {
+    showToast('Lỗi kết nối khi đặt lại ngăn tủ!', 'error');
   }
 }
 

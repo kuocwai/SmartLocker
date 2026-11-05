@@ -131,7 +131,7 @@
             <span>Trung Tâm Giám Sát Thời Gian Thực & SLA</span>
           </h2>
           <p class="text-xs sm:text-sm text-slate-500 mt-1">
-            Theo dõi trạng thái cảm biến phần cứng (E18-D80NK, MC-38) và đếm ngược an toàn thực phẩm.
+            Theo dõi trạng thái cảm biến phần cứng E18-D80NK và đếm ngược an toàn thực phẩm.
           </p>
         </div>
         <button onclick="fetchLockerData()" class="px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold border border-slate-300 bg-slate-50 text-slate-700 hover:bg-slate-100 transition flex items-center gap-2 cursor-pointer">
@@ -160,20 +160,16 @@
 
           <!-- Các chỉ số phần cứng -->
           <div class="grid grid-cols-2 gap-3 text-xs">
-            <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70">
-              <span class="text-slate-400 block mb-1">Cảm biến MC-38</span>
-              <div class="flex items-center gap-2 font-bold text-slate-800 text-sm">
-                <i id="dash-icon-door-1" class="fa-solid fa-door-closed text-slate-500"></i>
-                <span id="dash-val-door-1">Đang đóng</span>
-              </div>
-            </div>
-            <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70">
-              <span class="text-slate-400 block mb-1">Cảm biến E18-D80NK</span>
+            <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70 col-span-2">
+            <span class="text-slate-400 block mb-1">Cảm biến vật thể E18-D80NK</span>
+            <div class="flex items-center justify-between">
               <div class="flex items-center gap-2 font-bold text-slate-800 text-sm">
                 <i id="dash-icon-item-1" class="fa-solid fa-box text-slate-500"></i>
                 <span id="dash-val-item-1">Ngăn trống</span>
               </div>
+              <span class="text-[11px] text-emerald-600 font-semibold bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">Tự động nhận diện</span>
             </div>
+          </div>
           </div>
 
           <!-- Đồng hồ & Thanh Tiến Trình SLA -->
@@ -221,20 +217,16 @@
 
           <!-- Các chỉ số phần cứng -->
           <div class="grid grid-cols-2 gap-3 text-xs">
-            <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70">
-              <span class="text-slate-400 block mb-1">Cảm biến MC-38</span>
-              <div class="flex items-center gap-2 font-bold text-slate-800 text-sm">
-                <i id="dash-icon-door-2" class="fa-solid fa-door-closed text-slate-500"></i>
-                <span id="dash-val-door-2">Đang đóng</span>
-              </div>
-            </div>
-            <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70">
-              <span class="text-slate-400 block mb-1">Cảm biến E18-D80NK</span>
+            <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70 col-span-2">
+            <span class="text-slate-400 block mb-1">Cảm biến vật thể E18-D80NK</span>
+            <div class="flex items-center justify-between">
               <div class="flex items-center gap-2 font-bold text-slate-800 text-sm">
                 <i id="dash-icon-item-2" class="fa-solid fa-box text-slate-500"></i>
                 <span id="dash-val-item-2">Ngăn trống</span>
               </div>
+              <span class="text-[11px] text-emerald-600 font-semibold bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">Tự động nhận diện</span>
             </div>
+          </div>
           </div>
 
           <!-- Đồng hồ & Thanh Tiến Trình SLA -->
@@ -323,13 +315,11 @@
             </h4>
 
             <div class="space-y-2">
-              <button onclick="simVerifyShipper(1)" class="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 transition flex items-center justify-center gap-2">
-                <i class="fa-solid fa-truck-fast"></i>
+              <button onclick="simVerifyShipper(1)" class="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 transition flex items-center justify-center cursor-pointer">
                 <span>1. Giả lập Shipper nhập mã & cất đồ (-> STORED)</span>
               </button>
 
-              <button onclick="simVerifyStudent(1)" class="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 transition flex items-center justify-center gap-2">
-                <i class="fa-solid fa-user-graduate"></i>
+              <button onclick="simVerifyStudent(1)" class="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 transition flex items-center justify-center cursor-pointer">
                 <span>2. Giả lập Sinh viên nhập mã lấy đồ (-> COMPLETED)</span>
               </button>
             </div>
@@ -346,6 +336,14 @@
                 </button>
               </div>
             </div>
+
+            <!-- Nút Reset riêng Ngăn 1 -->
+            <div class="pt-2 border-t border-slate-200">
+              <button onclick="simResetLocker(1)" class="w-full py-2 px-3 rounded-xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition flex items-center justify-center gap-2 cursor-pointer">
+                <i class="fa-solid fa-rotate-left"></i>
+                <span>Reset Ngăn 1 về AVAILABLE</span>
+              </button>
+            </div>
           </div>
 
           <!-- HỘP TEST GIẢ LẬP NGĂN 2 -->
@@ -356,13 +354,11 @@
             </h4>
 
             <div class="space-y-2">
-              <button onclick="simVerifyShipper(2)" class="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 transition flex items-center justify-center gap-2">
-                <i class="fa-solid fa-truck-fast"></i>
+              <button onclick="simVerifyShipper(2)" class="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 transition flex items-center justify-center cursor-pointer">
                 <span>1. Giả lập Shipper nhập mã & cất đồ (-> STORED)</span>
               </button>
 
-              <button onclick="simVerifyStudent(2)" class="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 transition flex items-center justify-center gap-2">
-                <i class="fa-solid fa-user-graduate"></i>
+              <button onclick="simVerifyStudent(2)" class="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 transition flex items-center justify-center cursor-pointer">
                 <span>2. Giả lập Sinh viên nhập mã lấy đồ (-> COMPLETED)</span>
               </button>
             </div>
@@ -378,6 +374,14 @@
                   +120 phút (Quá hạn)
                 </button>
               </div>
+            </div>
+
+            <!-- Nút Reset riêng Ngăn 2 -->
+            <div class="pt-2 border-t border-slate-200">
+              <button onclick="simResetLocker(2)" class="w-full py-2 px-3 rounded-xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition flex items-center justify-center gap-2 cursor-pointer">
+                <i class="fa-solid fa-rotate-left"></i>
+                <span>Reset Ngăn 2 về AVAILABLE</span>
+              </button>
             </div>
           </div>
 

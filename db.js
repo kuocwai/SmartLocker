@@ -349,6 +349,32 @@ const db = {
     }
   },
 
+  resetLocker(compartmentId) {
+    const compId = Number(compartmentId);
+    const now = Date.now();
+    if (useSqlite) {
+      dbInstance.transaction(() => {
+        dbInstance.prepare("UPDATE orders SET status='CANCELLED', completed_at=? WHERE compartment_id=? AND status IN ('WAITING_DELIVERY','STORED','ABANDONED')").run(now, compId);
+        dbInstance.prepare("UPDATE lockers SET status='AVAILABLE', door_state='CLOSED', item_state='EMPTY', active_order_id=NULL WHERE id=?").run(compId);
+      })();
+    } else {
+      commitJson(next => {
+        for (const order of next.orders) {
+          if (order.compartment_id === compId && ['WAITING_DELIVERY','STORED','ABANDONED'].includes(order.status)) {
+            order.status = 'CANCELLED';
+            order.completed_at = now;
+          }
+        }
+        for (const locker of next.lockers) {
+          if (locker.id === compId) {
+            Object.assign(locker, { status: 'AVAILABLE', door_state: 'CLOSED', item_state: 'EMPTY', active_order_id: null });
+          }
+        }
+      });
+    }
+    return this.getLocker(compId);
+  },
+
   resetAllLockers() {
     const now = Date.now();
     if (useSqlite) {

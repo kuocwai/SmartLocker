@@ -540,9 +540,22 @@ app.get('/api/orders/history', requireAdmin, (req, res) => {
   res.json({ success: true, history });
 });
 
-// 7. Reset toàn bộ 2 ngăn tủ về AVAILABLE (Dành cho demo / thuyết trình)
+// 7. Reset ngăn tủ về AVAILABLE (Hỗ trợ reset từng ngăn hoặc toàn bộ)
 app.post('/api/lockers/reset', requireAdmin, (req, res) => {
   const force = req.body && req.body.force === true;
+  const compId = req.body && req.body.compartment_id ? Number(req.body.compartment_id) : null;
+
+  if (compId && [1, 2].includes(compId)) {
+    const locker = db.getLocker(compId);
+    if (!force && locker && (locker.item_state === 'DETECTED' || locker.status === 'STORED' || locker.status === 'ABANDONED')) {
+      return res.status(409).json({ success: false, message: `Ngăn ${compId} còn hàng hoặc đơn quá hạn; cần kiểm tra trước khi reset.` });
+    }
+    db.resetLocker(compId);
+    console.log(`[RESET] Đã đặt lại Ngăn ${compId} về AVAILABLE.`);
+    broadcastUpdate('LOCKERS_RESET', { compartment_id: compId });
+    return res.json({ success: true, message: `Đã đặt lại Ngăn ${compId} về trạng thái trống!`, lockers: db.getLockers().map(enrichLockerWithSLA) });
+  }
+
   if (!force && db.getLockers().some(l => l.item_state === 'DETECTED' || l.status === 'STORED' || l.status === 'ABANDONED')) {
     return res.status(409).json({ success: false, message: 'Tủ còn hàng hoặc đơn quá hạn; cần kiểm tra và xử lý thủ công trước khi reset.' });
   }
