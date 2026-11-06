@@ -607,16 +607,17 @@ void checkWiFiConnection() {
 // 10. SETUP & MAIN LOOP
 // ======================================================================================
 void setup() {
-  Serial.begin(115200);
-  delay(500);
-  Serial.println("\n\n========================================================");
-  Serial.println("  SMART LOCKER (CLOUD / RAILWAY) FIRMWARE KHOI DONG");
-  Serial.println("========================================================");
-
+  // Khoa ngay lap tuc 2 kenh Relay o muc CAO trong 1 micro-giay dau tien de triet tieu 100% xung kich khi bat nguon
   digitalWrite(PIN_RELAY_1, HIGH);
   digitalWrite(PIN_RELAY_2, HIGH);
   pinMode(PIN_RELAY_1, OUTPUT);
   pinMode(PIN_RELAY_2, OUTPUT);
+
+  Serial.begin(115200);
+  delay(100);
+  Serial.println("\n\n========================================================");
+  Serial.println("  SMART LOCKER (CLOUD / RAILWAY) FIRMWARE KHOI DONG");
+  Serial.println("========================================================");
 
   pinMode(PIN_BUZZER, OUTPUT);
   digitalWrite(PIN_BUZZER, LOW);
