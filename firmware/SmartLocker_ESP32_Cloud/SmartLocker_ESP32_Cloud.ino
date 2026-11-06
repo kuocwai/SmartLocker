@@ -282,15 +282,15 @@ void verifyOtpWithServer(String otpCode) {
   triggerSolenoidUnlock(compId);
   if (role == "SHIPPER") {
     lcdPrintLine(0, " XIN CHAO SHIPPER!  ", true);
-    lcdPrintLine(1, "HAY BO HANG VAO NGAN", true);
-    lcdPrintLine(2, "SO " + String(compId) + " VA DONG CUA", true);
-    lcdPrintLine(3, "====================", true);
+    lcdPrintLine(1, "BO HANG VAO NGAN " + String(compId) + "  ", true);
+    lcdPrintLine(2, "CAM BIEN: [DANG CHO]", true);
+    lcdPrintLine(3, "BAM 1-9 DE XN THU CG", true);
     currentState = STATE_WAITING_DEPOSIT;
   } else {
     lcdPrintLine(0, "   XIN CHAO BAN!    ", true);
-    lcdPrintLine(1, "HAY LAY MON AN TAI  ", true);
-    lcdPrintLine(2, "NGAN " + String(compId) + " & DONG CUA", true);
-    lcdPrintLine(3, "====================", true);
+    lcdPrintLine(1, "LAY DO TU NGAN " + String(compId) + "    ", true);
+    lcdPrintLine(2, "CAM BIEN: [DANG CHO]", true);
+    lcdPrintLine(3, "BAM 1-9 DE XN THU CG", true);
     currentState = STATE_WAITING_PICKUP;
   }
   stateTimer = millis();
@@ -373,6 +373,11 @@ void handleSerialOtpInput() {
     char c = Serial.read();
     if (c == '\r') continue;
     if (c == '\n') {
+      if (currentState == STATE_WAITING_DEPOSIT || currentState == STATE_WAITING_PICKUP) {
+        manualConfirmRequested = true;
+        Serial.println("\n[SERIAL] Nhan phim Enter -> Xac nhan hoan tat chu trinh thu cong!");
+        return;
+      }
       if (enteredOtp.length() >= 4) {
         Serial.println("\n[SERIAL] Xac thuc OTP dang nhap.");
         String code = enteredOtp;
@@ -490,52 +495,83 @@ void handleSensorStateMachine() {
   const unsigned long now = millis();
 
 #if VIRTUAL_MC38_MODE
-  // Chế độ MC-38 ảo: Tự động hóa qua E18 (500ms) + Phím [#] xác nhận thủ công dự phòng
-  static unsigned long e18StableSince = 0;
+  // ====================================================================================
+  // CHẾ ĐỘ MC-38 ẢO: Tự động qua E18 (400ms) + Bấm phím 1-9 bất kỳ / Enter để xác nhận thủ công
+  // ====================================================================================
+  static int lastLoggedE18 = -1;
   static int lastFeedback = -1;
+  static unsigned long e18StableSince = 0;
+
   if (currentState == STATE_WAITING_DEPOSIT || currentState == STATE_WAITING_PICKUP) {
     const bool isDeposit = (currentState == STATE_WAITING_DEPOSIT);
     const bool expectedItem = isDeposit ? (e18Value == LOW) : (e18Value == HIGH);
 
-    // Phản hồi trực tiếp trên Dòng 3 LCD để người dùng biết mắt thần có bắt được đồ chưa
+    if (e18Value != lastLoggedE18) {
+      lastLoggedE18 = e18Value;
+      Serial.printf("[SENSOR-LIVE] Ngan %d | E18(GPIO %d): %s\n",
+                    currentActiveCompartment, activeE18Pin,
+                    e18Value == LOW ? "CO DO (LOW - PHAT HIEN)" : "TRONG (HIGH - CHUA THAY)");
+    }
+
+    // Hiển thị trực quan trạng thái cảm biến lên Dòng 2 & 3 của LCD
     int currentFb = expectedItem ? 1 : 0;
     if (currentFb != lastFeedback) {
       lastFeedback = currentFb;
       if (expectedItem) {
-        lcdPrintLine(3, isDeposit ? ">> DA THAY DO AN! <<" : ">> DA LAY HET DO! <<", true);
+        lcdPrintLine(2, isDeposit ? ">> DA THAY DO AN! <<" : ">> DA LAY HET DO! <<", true);
+        lcdPrintLine(3, "TU DONG LUU SAU 0.4S", true);
       } else {
-        lcdPrintLine(3, "BAM PHIM BAT KY XONG", true);
+        lcdPrintLine(2, isDeposit ? "CAM BIEN: [CHUA THAY]" : "CAM BIEN: [CON DO]  ", true);
+        lcdPrintLine(3, "HOAC BAM 1-9 DE XN  ", true);
       }
     }
 
-    if (now - stateTimer < 600) {
-      mc38Value = HIGH; // Vừa bung khóa: Cửa mở
-      e18StableSince = 0;
-    } else {
-      if (manualConfirmRequested) {
-        manualConfirmRequested = false;
-        mc38Value = LOW; // Xác nhận tức thì qua phím [#]
-        Serial.println("[SENSOR] Hoan tat chu trinh qua phim [#]");
-      } else if (expectedItem) {
+    bool shouldComplete = false;
+
+    // Đường 1: Xác nhận thủ công tức thì qua bàn phím (phím 1-9 bất kỳ) hoặc Enter từ Serial
+    if (manualConfirmRequested) {
+      manualConfirmRequested = false;
+      shouldComplete = true;
+      Serial.println("[SENSOR] >>> XAC NHAN THU CONG THANH CONG QUA BAN PHIM / SERIAL! <<<");
+    }
+    // Đường 2: Cảm biến E18 phát hiện ổn định liên tục 400ms (sau khi khóa đã đóng lại 600ms)
+    else if (now - stateTimer >= 600) {
+      if (expectedItem) {
         if (e18StableSince == 0) e18StableSince = now;
-        if (now - e18StableSince >= 500) {
-          mc38Value = LOW; // Nhận diện vật thể ổn định 0.5 giây -> Tự động xác nhận đóng cửa
-        } else {
-          mc38Value = HIGH;
+        if (now - e18StableSince >= 400) {
+          shouldComplete = true;
+          Serial.println("[SENSOR] >>> E18 ON DINH 400MS -> TU DONG HOAN TAT CHU TRINH! <<<");
         }
       } else {
         e18StableSince = 0;
-        mc38Value = HIGH;
       }
     }
+
+    if (shouldComplete) {
+      e18StableSince = 0;
+      lastFeedback = -1;
+      lastLoggedE18 = -1;
+      fix04PendingEvent = isDeposit ? "ITEM_STORED" : "ITEM_PICKED";
+      currentState = STATE_PENDING_UPDATE;
+      fix04LastPostAttempt = now - FIX04_RETRY_MS; // Gửi POST Cloud ngay lập tức
+
+      beep(100); delay(50); beep(120);
+      lcdPrintLine(0, "   DA XAC NHAN!     ", true);
+      lcdPrintLine(1, "DANG DONG BO CLOUD..", true);
+      lcdPrintLine(2, "XIN VUI LONG CHO... ", true);
+      lcdPrintLine(3, "====================", true);
+      Serial.printf("[CLOUD] Hoan tat chu trinh ngan %d -> %s. Gui len Cloud Server...\n", 
+                    currentActiveCompartment, fix04PendingEvent.c_str());
+      return;
+    }
+    return;
   } else {
     lastFeedback = -1;
-    if (currentState == STATE_PENDING_UPDATE) {
-      mc38Value = LOW;
-    }
+    lastLoggedE18 = -1;
+    e18StableSince = 0;
   }
-#endif
-
+#else
+  // Chế độ MC-38 vật lý (khi có công tắc từ gắn ở cánh cửa tủ)
   static int lastLoggedE18 = -1, lastLoggedMC38 = -1;
   if ((currentState == STATE_WAITING_DEPOSIT || currentState == STATE_WAITING_PICKUP) &&
       (e18Value != lastLoggedE18 || mc38Value != lastLoggedMC38)) {
@@ -559,7 +595,11 @@ void handleSensorStateMachine() {
       lcdPrintLine(3, "VUI LONG CHO", true);
       Serial.println("[CLOUD] Door cycle stable, awaiting Cloud Backend ACK.");
     }
-  } else if (currentState == STATE_PENDING_UPDATE) {
+    return;
+  }
+#endif
+
+  if (currentState == STATE_PENDING_UPDATE) {
     const bool isDeposit = fix04PendingEvent == "ITEM_STORED";
 #if !VIRTUAL_MC38_MODE
     if (mc38Value != LOW || (isDeposit ? e18Value != LOW : e18Value != HIGH)) {
