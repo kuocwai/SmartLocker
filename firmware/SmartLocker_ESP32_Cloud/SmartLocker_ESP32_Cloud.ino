@@ -48,9 +48,9 @@ const int HTTP_TIMEOUT_MS = 8000;
 #define PIN_RELAY_1       18
 #define PIN_RELAY_2       19
 
-// Cấu hình mức kích Relay: Bo của bạn kích mức CAO (Active-HIGH): ON = HIGH, OFF = LOW
-#define RELAY_TRIGGER_ON     HIGH
-#define RELAY_TRIGGER_OFF    LOW
+// Cấu hình mức kích Relay chuẩn Active-LOW: OFF = HIGH (ngắt relay), ON = LOW (kích relay 0.6s)
+#define RELAY_TRIGGER_ON     LOW
+#define RELAY_TRIGGER_OFF    HIGH
 #define PIN_SENSOR_E18    25
 #define PIN_SENSOR_MC38   26
 #define PIN_SENSOR_E18_2  32
