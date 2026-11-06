@@ -284,13 +284,13 @@ void verifyOtpWithServer(String otpCode) {
     lcdPrintLine(0, " XIN CHAO SHIPPER!  ", true);
     lcdPrintLine(1, "BO HANG VAO NGAN " + String(compId) + "  ", true);
     lcdPrintLine(2, "CAM BIEN: [DANG CHO]", true);
-    lcdPrintLine(3, "BAM 1-9 DE XN THU CG", true);
+    lcdPrintLine(3, "BAM 1-9 DE XAC NHAN ", true);
     currentState = STATE_WAITING_DEPOSIT;
   } else {
     lcdPrintLine(0, "   XIN CHAO BAN!    ", true);
     lcdPrintLine(1, "LAY DO TU NGAN " + String(compId) + "    ", true);
     lcdPrintLine(2, "CAM BIEN: [DANG CHO]", true);
-    lcdPrintLine(3, "BAM 1-9 DE XN THU CG", true);
+    lcdPrintLine(3, "BAM 1-9 DE XAC NHAN ", true);
     currentState = STATE_WAITING_PICKUP;
   }
   stateTimer = millis();
@@ -522,7 +522,7 @@ void handleSensorStateMachine() {
         lcdPrintLine(3, "TU DONG LUU SAU 0.4S", true);
       } else {
         lcdPrintLine(2, isDeposit ? "CAM BIEN: [CHUA THAY]" : "CAM BIEN: [CON DO]  ", true);
-        lcdPrintLine(3, "HOAC BAM 1-9 DE XN  ", true);
+        lcdPrintLine(3, "BAM 1-9 DE XAC NHAN ", true);
       }
     }
 
