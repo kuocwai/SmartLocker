@@ -433,13 +433,17 @@ void checkI2CKeypadInput() {
           char pressedKey = keys[r][c];
           Serial.printf("[KEYPAD] Phim duoc nhan: %c\n", pressedKey);
           if (currentState == STATE_WAITING_DEPOSIT || currentState == STATE_WAITING_PICKUP) {
-            if (pressedKey == '#' || pressedKey == '*') {
-              beep(80); delay(40); beep(80);
-              manualConfirmRequested = true;
-              Serial.println("[KEYPAD] Bam [#] xac nhan hoan tat chu trinh thu cong!");
-              delay(300);
-              return;
-            }
+            beep(80); delay(40); beep(80);
+            manualConfirmRequested = true;
+            Serial.printf("[KEYPAD] Bam phim '%c' xac nhan hoan tat chu trinh thu cong!\n", pressedKey);
+            delay(300);
+            return;
+          }
+          if (pressedKey == 'A' || pressedKey == 'B' || pressedKey == 'C' || pressedKey == 'D') {
+            beep(40);
+            Serial.printf("[KEYPAD] Phim chuc nang: %c\n", pressedKey);
+            delay(200);
+            return;
           }
           if (pressedKey == '*') {
             beep(60);
@@ -500,7 +504,7 @@ void handleSensorStateMachine() {
       if (expectedItem) {
         lcdPrintLine(3, isDeposit ? ">> DA THAY DO AN! <<" : ">> DA LAY HET DO! <<", true);
       } else {
-        lcdPrintLine(3, "HOAC BAM [#] DE XONG", true);
+        lcdPrintLine(3, "BAM PHIM BAT KY XONG", true);
       }
     }
 
