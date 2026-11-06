@@ -172,10 +172,11 @@ void showMessageAndPause(String l0, String l1, String l2, String l3, unsigned lo
 // ======================================================================================
 void triggerSolenoidUnlock(int compartmentId) {
   int relayPin = (compartmentId == 1) ? PIN_RELAY_1 : PIN_RELAY_2;
-  Serial.printf("[SOLENOID] >>> KICH MO KHOA NGAN %d (GPIO %d: 0.6s) <<<\n", compartmentId, relayPin);
-  digitalWrite(relayPin, RELAY_TRIGGER_ON);
+  Serial.printf("[SOLENOID] >>> KICH MO KHOA NGAN %d (0.6s) <<<\n", compartmentId);
+  pinMode(relayPin, OUTPUT);
+  digitalWrite(relayPin, LOW);
   delay(SOLENOID_PULSE_MS);
-  digitalWrite(relayPin, RELAY_TRIGGER_OFF);
+  pinMode(relayPin, INPUT);
   Serial.printf("[SOLENOID] >>> DA KHOA LAI CHOT NGAN %d <<<\n", compartmentId);
 }
 
@@ -611,11 +612,9 @@ void checkWiFiConnection() {
 // 10. SETUP & MAIN LOOP
 // ======================================================================================
 void setup() {
-  // Khoa ngay lap tuc 2 kenh Relay o muc CAO trong 1 micro-giay dau tien de triet tieu 100% xung kich khi bat nguon
-  digitalWrite(PIN_RELAY_1, RELAY_TRIGGER_OFF);
-  digitalWrite(PIN_RELAY_2, RELAY_TRIGGER_OFF);
-  pinMode(PIN_RELAY_1, OUTPUT);
-  pinMode(PIN_RELAY_2, OUTPUT);
+  // Che do Tro khang cao (INPUT / Hi-Z): Mo mach hoan toan nhu khi rut day ra -> Relay NGAT 100%
+  pinMode(PIN_RELAY_1, INPUT);
+  pinMode(PIN_RELAY_2, INPUT);
 
   Serial.begin(115200);
   delay(100);
