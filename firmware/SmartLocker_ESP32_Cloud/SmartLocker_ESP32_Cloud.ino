@@ -47,6 +47,10 @@ const int HTTP_TIMEOUT_MS = 8000;
 // ======================================================================================
 #define PIN_RELAY_1       18
 #define PIN_RELAY_2       19
+
+// Cấu hình mức kích Relay: Bo của bạn kích mức CAO (Active-HIGH): ON = HIGH, OFF = LOW
+#define RELAY_TRIGGER_ON     HIGH
+#define RELAY_TRIGGER_OFF    LOW
 #define PIN_SENSOR_E18    25
 #define PIN_SENSOR_MC38   26
 #define PIN_SENSOR_E18_2  32
@@ -168,11 +172,11 @@ void showMessageAndPause(String l0, String l1, String l2, String l3, unsigned lo
 // ======================================================================================
 void triggerSolenoidUnlock(int compartmentId) {
   int relayPin = (compartmentId == 1) ? PIN_RELAY_1 : PIN_RELAY_2;
-  Serial.printf("[SOLENOID] >>> KICH MO KHOA NGAN %d (GPIO %d: LOW 0.6s) <<<\n", compartmentId, relayPin);
-  digitalWrite(relayPin, LOW);
+  Serial.printf("[SOLENOID] >>> KICH MO KHOA NGAN %d (GPIO %d: 0.6s) <<<\n", compartmentId, relayPin);
+  digitalWrite(relayPin, RELAY_TRIGGER_ON);
   delay(SOLENOID_PULSE_MS);
-  digitalWrite(relayPin, HIGH);
-  Serial.printf("[SOLENOID] >>> DA KHOA LAI CHOT NGAN %d (GPIO %d: HIGH) <<<\n", compartmentId, relayPin);
+  digitalWrite(relayPin, RELAY_TRIGGER_OFF);
+  Serial.printf("[SOLENOID] >>> DA KHOA LAI CHOT NGAN %d <<<\n", compartmentId);
 }
 
 // ======================================================================================
@@ -608,8 +612,8 @@ void checkWiFiConnection() {
 // ======================================================================================
 void setup() {
   // Khoa ngay lap tuc 2 kenh Relay o muc CAO trong 1 micro-giay dau tien de triet tieu 100% xung kich khi bat nguon
-  digitalWrite(PIN_RELAY_1, HIGH);
-  digitalWrite(PIN_RELAY_2, HIGH);
+  digitalWrite(PIN_RELAY_1, RELAY_TRIGGER_OFF);
+  digitalWrite(PIN_RELAY_2, RELAY_TRIGGER_OFF);
   pinMode(PIN_RELAY_1, OUTPUT);
   pinMode(PIN_RELAY_2, OUTPUT);
 
